@@ -32,7 +32,7 @@ Later", and otherwise install it silently the next time the app quits.
 
 Electron ships Chromium security fixes in its patch releases, usually
 without an npm advisory. The **Electron updates** workflow
-(`.github/workflows/electron-release.yml`) runs every day and fails, so
+(`.github/workflows/electron-release.yml`) runs every Monday and fails, so
 GitHub emails the owner, when:
 
 - a newer release of the pinned major line is out. The run summary lists
@@ -42,6 +42,11 @@ GitHub emails the owner, when:
 
 It warns without failing when the pinned line becomes the oldest supported
 one, which leaves time to plan the move to a new major.
+
+Checking once a week gathers Electron's frequent patch releases into one
+update. To check sooner, for example when an actively exploited Chromium bug
+is in the news, run it by hand: Actions → **Electron updates** → **Run
+workflow**.
 
 When it fails:
 

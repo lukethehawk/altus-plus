@@ -115,7 +115,7 @@ withdrawn, after re-running the audit with the ignore list off
 The workflow also fails on **any** advisory against `electron`
 (`.github/scripts/check-electron-advisories.mjs`), whatever its severity.
 Newer Electron releases, which carry Chromium security fixes without an npm
-advisory, are checked daily by a separate workflow (`docs/RELEASING.md`,
+advisory, are checked weekly by a separate workflow (`docs/RELEASING.md`,
 "Electron updates").
 
 ## Not claimed

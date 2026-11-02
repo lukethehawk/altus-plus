@@ -1,12 +1,13 @@
 name: Electron updates
 
-# Daily check for newer releases of the pinned Electron major line, which
-# carry Chromium security fixes that usually get no npm advisory, and for the
-# end of support of that line. A failed run (GitHub emails the repository
-# owner) means Electron needs updating; see docs/RELEASING.md.
+# Weekly check (Monday morning, like the Security audit) for newer releases
+# of the pinned Electron major line, which carry Chromium security fixes that
+# usually get no npm advisory, and for the end of support of that line. A
+# failed run (GitHub emails the repository owner) means Electron needs
+# updating; see docs/RELEASING.md. Run it by hand to check sooner.
 on:
   schedule:
-    - cron: '41 5 * * *'
+    - cron: '41 5 * * 1'
   workflow_dispatch:
 
 permissions:
