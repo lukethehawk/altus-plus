@@ -1,0 +1,2 @@
+# yarn.lock records a hash of each patch: keep them byte-identical on every OS.
+/.yarn/patches/*.patch text eol=lf
