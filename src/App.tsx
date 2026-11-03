@@ -15,10 +15,12 @@ import CustomTitlebar from "./components/CustomTitlebar";
 import { I18NProvider } from "./i18n/solid";
 import ThemeManagerDialog from "./components/ThemeManagerDialog";
 import DownloadToast from "./components/DownloadToast";
+import ResourceUsageDialog from "./components/ResourceUsageDialog";
 
 const App: Component = () => {
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [isThemeManagerOpen, setIsThemeManagerOpen] = createSignal(false);
+  const [isResourceUsageOpen, setIsResourceUsageOpen] = createSignal(false);
   const [menu, { refetch: refetchAppMenu }] = createResource(window.getAppMenu);
 
   const handlers = new Set<() => void>();
@@ -35,6 +37,11 @@ const App: Component = () => {
   handlers.add(
     window.electronIPCHandlers.onOpenThemeManager(() => {
       setIsThemeManagerOpen(true);
+    })
+  );
+  handlers.add(
+    window.electronIPCHandlers.onOpenResourceUsage(() => {
+      setIsResourceUsageOpen(true);
     })
   );
   handlers.add(
@@ -75,6 +82,10 @@ const App: Component = () => {
         <ThemeManagerDialog
           isOpen={isThemeManagerOpen}
           setIsOpen={setIsThemeManagerOpen}
+        />
+        <ResourceUsageDialog
+          isOpen={isResourceUsageOpen}
+          setIsOpen={setIsResourceUsageOpen}
         />
         <DownloadToast />
       </div>

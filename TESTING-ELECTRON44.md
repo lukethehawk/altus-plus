@@ -128,6 +128,11 @@ logged in.
     outside the window changes nothing. Unticking it stops dragging again,
     and the choice survives a restart. With the custom title bar on, the
     item shows a tick too.
+16. **Resource Usage:** Help → Resource Usage lists every account in tab
+    order with its CPU and memory, then WhatsApp's service workers and the
+    app's own processes, with a total. It refreshes every 2 seconds while
+    open; a busy account (e.g. scrolling a chat full of media) shows a
+    higher CPU share. "Copy" puts the table on the clipboard.
 
 ### Automated smoke test
 
@@ -157,7 +162,9 @@ fails it uploads no installer.
    - with the window shown, dragging Alfa onto Gamma does nothing while
      "Allow Moving Tabs" is off (the default). Turned on with the setting
      the menu item saves, the item is ticked, and the same drag moves Alfa
-     after Gamma, in the window and in `tabs.json`.
+     after Gamma, in the window and in `tabs.json`;
+   - with the window shown, Help → Resource Usage lists the three accounts,
+     each with its own memory, and the app's main process and window.
 
    Where the machine has no audio output (the selected tab is not reported
    as playing either), only the playing check is skipped, with a note. Run

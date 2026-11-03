@@ -3,6 +3,7 @@ import { type ElectronThemeStoreIpcApi } from "./stores/themes/common";
 import { type ElectronSettingsStoreIpcApi } from "./stores/settings/common";
 import { type CloneableMenu } from "./main";
 import { type ElectronIPCHandlers } from "./ipcHandlersType";
+import { type ResourceGroup } from "./utils/resources";
 
 // Types for APIs exposed to the renderer process via contextBridge
 
@@ -33,6 +34,7 @@ declare global {
       options: Electron.MessageBoxOptions
     ) => Promise<Electron.MessageBoxReturnValue>;
     getAppMenu: () => Promise<CloneableMenu>;
+    getResourceUsage: () => Promise<ResourceGroup[]>;
     i18n: {
       getTranslations: () => Promise<{
         current: Record<string, string>;
