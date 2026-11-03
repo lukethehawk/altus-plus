@@ -123,6 +123,10 @@ const ipcHandlers: ElectronIPCHandlers = {
     ipcRenderer.on("open-resource-usage", callback);
     return () => ipcRenderer.off("open-resource-usage", callback);
   },
+  onOpenResourceTest: (callback) => {
+    ipcRenderer.on("open-resource-test", callback);
+    return () => ipcRenderer.off("open-resource-test", callback);
+  },
   onMessageCount: (callback) => {
     const handler = (
       _: IpcRendererEvent,
@@ -161,6 +165,10 @@ contextBridge.exposeInMainWorld(
 
 contextBridge.exposeInMainWorld("getResourceUsage", () =>
   ipcRenderer.invoke("get-resource-usage")
+);
+
+contextBridge.exposeInMainWorld("startResourceTest", () =>
+  ipcRenderer.invoke("start-resource-test")
 );
 
 contextBridge.exposeInMainWorld("getAppMenu", () =>

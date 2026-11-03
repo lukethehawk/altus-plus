@@ -53,6 +53,15 @@ import { isMuteActive } from "./utils/notifications";
 import { formatTrayTooltip } from "./utils/tray";
 import { groupProcessUsage } from "./utils/resources";
 import {
+  RESOURCE_TEST_FLAG,
+  RESOURCE_TEST_FOLDER,
+  fill,
+  formatSummary,
+  localTime,
+  relaunchArgs,
+} from "./utils/resourceTest";
+import { ResourceTestRecorder } from "./resourceTest";
+import {
   checkForUpdates,
   installDownloadedUpdate,
   isQuittingForUpdate,
@@ -116,6 +125,62 @@ function updateTrayTooltip(tabs?: Tab[]) {
   } catch (error) {
     console.warn("Could not update the tray tooltip", error);
   }
+}
+
+// Help → Run Resource Test restarts the app with this flag; the test lasts
+// until Help → End Resource Test or quitting, never past this process.
+const resourceTestMode = process.argv.includes(RESOURCE_TEST_FLAG);
+let resourceTest: ResourceTestRecorder | undefined;
+const processStartedAt = Date.now() - process.uptime() * 1000;
+
+/** Restarts Altus + with the same arguments, in or out of the resource test. */
+function relaunch(inResourceTest: boolean) {
+  app.relaunch({ args: relaunchArgs(process.argv.slice(1), inResourceTest) });
+  if (tray) tray.destroy();
+  app.exit(0);
+}
+
+function startResourceTest(mainWindow: BrowserWindow) {
+  const cpus = String(os.cpus().length);
+  const ram = String(Math.round(os.totalmem() / 1024 ** 3));
+  const recorder = new ResourceTestRecorder({
+    directory: path.join(app.getPath("userData"), RESOURCE_TEST_FOLDER),
+    startedAt: processStartedAt,
+    sample: () => sampleResourceUsage(mainWindow),
+    description: `test started: ${APP_NAME} ${app.getVersion()}, Electron ${process.versions.electron}, ${cpus} logical CPUs, ${ram} GB RAM, ${os.type()} ${os.release()}`,
+    summarize: (summary, info) =>
+      formatSummary(
+        summary,
+        {
+          title: `${APP_NAME} ${app.getVersion()}`,
+          started: localTime(new Date(processStartedAt)),
+          computer: fill(electronI18N.t("resourceTestSummaryComputer"), { cpus, ram }),
+          ...info,
+        },
+        (key) => electronI18N.t(key),
+        electronI18N.getLanguage()
+      ),
+  });
+  try {
+    recorder.start();
+  } catch (error) {
+    console.error("Could not start the resource test", error);
+    return;
+  }
+  resourceTest = recorder;
+  // The title says a test is running, whatever the page sets.
+  mainWindow.on("page-title-updated", (event) => event.preventDefault());
+  if (mainWindow.isVisible()) recorder.windowShown();
+  else mainWindow.once("show", () => recorder.windowShown());
+}
+
+/** Help → End Resource Test: shows the results and restarts normally. */
+function endResourceTest() {
+  if (resourceTest) {
+    const files = resourceTest.finish();
+    shell.showItemInFolder(fs.existsSync(files.summary) ? files.summary : files.samples);
+  }
+  relaunch(false);
 }
 
 /** CPU and memory of each account and of the app's own processes, now. */
@@ -206,6 +271,7 @@ function quitApp() {
 // app.exit() skips the quit event the updater installs on, so a downloaded
 // update is installed here explicitly (silently, without relaunching).
 function exitApp() {
+  resourceTest?.finish();
   if (!installDownloadedUpdate({ relaunch: false })) app.exit(0);
 }
 
@@ -389,6 +455,7 @@ if (!singleInstanceLock) {
     }
 
     const mainWindow = createWindow();
+    if (resourceTestMode) startResourceTest(mainWindow);
 
     contextMenu();
 
@@ -427,6 +494,9 @@ if (!singleInstanceLock) {
 
     addIPCHandlers(mainWindow);
   });
+
+  // Closing the last window or an update quits without exitApp().
+  app.on("will-quit", () => resourceTest?.finish());
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {
@@ -702,6 +772,11 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
   // Polled by the Resource Usage panel while it is open.
   handle("get-resource-usage", () => sampleResourceUsage(mainWindow));
 
+  // "Restart and Measure" in the Run Resource Test dialog.
+  handle("start-resource-test", () => {
+    if (!resourceTestMode) relaunch(true);
+  });
+
   handle("theme-store-get", () => {
     return electronThemeStore.store;
   });
@@ -875,6 +950,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
       if (!activeIds.has(id)) unreadByTab.delete(id);
     }
     unreadByTab.set(tabId, messageCount as number);
+    resourceTest?.accountLoaded(tabId, tabs.find((tab) => tab.id === tabId)?.name ?? "");
     mainWindow.webContents.send("message-count", { tabId, messageCount });
     updateTrayTooltip(tabs);
     if (!getSettingWithDefault("notificationBadge")) {
@@ -950,6 +1026,9 @@ async function initializeI18N(mainWindow: BrowserWindow) {
     }
     mainWindow.webContents.send("reload-custom-title-bar");
     mainWindow.webContents.send("reload-translations");
+    if (resourceTest) {
+      mainWindow.setTitle(`${APP_NAME} ${app.getVersion()} — ${electronI18N.t("Resource test in progress")}`);
+    }
   });
 
   try {
@@ -1250,6 +1329,20 @@ ${aboutDialogText}`,
           },
           id: "resource-usage",
         },
+        resourceTestMode
+          ? {
+              label: electronI18N.t("End Resource Test"),
+              click: endResourceTest,
+              id: "end-resource-test",
+            }
+          : {
+              label: electronI18N.t("Run Resource Test…"),
+              click() {
+                const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+                if (window) window.webContents.send("open-resource-test");
+              },
+              id: "resource-test",
+            },
         {
           label: electronI18N.t("Links"),
           submenu: [

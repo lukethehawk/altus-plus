@@ -1,7 +1,7 @@
 // Smoke test of the packaged Windows app, run by CI after `yarn make`.
 //
-//   node .github/scripts/smoke-test.mjs              checks 1-5 (`yarn smoke`)
-//   node .github/scripts/smoke-test.mjs --installer  checks 1-8
+//   node .github/scripts/smoke-test.mjs              checks 1-6 (`yarn smoke`)
+//   node .github/scripts/smoke-test.mjs --installer  checks 1-9
 //
 // 1. fuses baked into the executable;
 // 2. a modified app.asar is refused at startup;
@@ -15,12 +15,15 @@
 //    Tabs move by dragging only once "Allow Moving Tabs" is on, and
 //    Help → Resource Usage lists every account.
 //    It plays a near-silent tone and shows a silent notification for a moment;
-// 6. the installer replaces a fake original Altus (/S --replace-altus), the
+// 6. Help → Run Resource Test restarts the app into the test, which records
+//    the three accounts into a CSV file; Help → End Resource Test writes the
+//    summary and restarts the app normally (it also opens Explorer there);
+// 7. the installer replaces a fake original Altus (/S --replace-altus), the
 //    installed app opens its tabs and settings and registers autostart;
-// 7. reinstalling never migrates again or touches the Altus + profile;
-// 8. uninstalling removes the program and keeps the profile.
+// 8. reinstalling never migrates again or touches the Altus + profile;
+// 9. uninstalling removes the program and keeps the profile.
 //
-// Checks 6-8 install Altus +, write %APPDATA% and uninstall, so they only run
+// Checks 7-9 install Altus +, write %APPDATA% and uninstall, so they only run
 // on a GitHub-hosted runner, which is discarded afterwards. The app is
 // observed through Chromium's DevTools protocol (--remote-debugging-port) and
 // stopped by PID. Failures leave logs and screenshots in smoke-artifacts/.
@@ -742,6 +745,138 @@ async function checkBackgroundTabs() {
   };
 }
 
+// --- check 6: resource test --------------------------------------------------
+
+/** IDs of every item in the app menu. */
+async function menuIds(cdp) {
+  const ids = [];
+  const walk = (items) => {
+    for (const item of items ?? []) {
+      if (item.id) ids.push(item.id);
+      walk(item.submenu);
+    }
+  };
+  walk(await cdp.evaluate("window.getAppMenu()"));
+  return ids;
+}
+
+/**
+ * Connects to the app window on a DevTools port once `ready` holds; across a
+ * restart the port first belongs to the old instance, then to the new one.
+ */
+function attachWhen(port, what, timeoutMs, ready) {
+  return waitFor(what, timeoutMs, async () => {
+    const page = (await targets(port)).find((target) => target.type === "page" && target.url.startsWith("file:"));
+    if (!page) return null;
+    const cdp = await Cdp.connect(page.webSocketDebuggerUrl);
+    try {
+      if (await ready(cdp)) return cdp;
+    } catch {
+      // The window is still loading, or its instance is quitting.
+    }
+    cdp.close();
+    return null;
+  });
+}
+
+/**
+ * Main processes of the app running on a profile. A restarted instance is
+ * not a child of this script, so it is found by its --user-data-dir.
+ */
+function instancesOnProfile(profile) {
+  const exe = `${packageJson.productName}.exe`.replace(/'/g, "''");
+  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+    `Get-CimInstance Win32_Process -Filter "Name='${exe}'" | Select-Object ProcessId, CommandLine | ConvertTo-Json -Compress`],
+  { encoding: "utf8" });
+  const parsed = JSON.parse(result.stdout.trim() || "[]");
+  return (Array.isArray(parsed) ? parsed : [parsed])
+    .filter((process) => process.CommandLine?.includes(`--user-data-dir=${profile}`) && !process.CommandLine.includes("--type="))
+    .map((process) => process.ProcessId);
+}
+
+async function checkResourceTest() {
+  const failures = [];
+  const notes = [];
+  const port = 9417;
+  const profile = fs.mkdtempSync(path.join(TEMP, "as-p-"));
+  const folder = path.join(profile, "resource-tests");
+  fs.writeFileSync(path.join(profile, "tabs.json"), JSON.stringify({
+    tabs: BACKGROUND_TABS, previouslyClosedTab: null, selectedTabId: ALFA.id,
+  }));
+  const first = launch(PACKAGED_EXE, [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`]);
+  let cdp;
+  try {
+    // Help → Run Resource Test… → Restart and Measure.
+    cdp = await attachWhen(port, "Help → Run Resource Test", 90_000, async (page) => (await menuIds(page)).includes("resource-test"));
+    await cdp.evaluate('window.clickMenuItem("resource-test")');
+    await waitFor("the Resource Test dialog", 10_000, () => cdp.evaluate('!!document.querySelector("[data-resource-test-start]")'));
+    await cdp.evaluate('document.querySelector("[data-resource-test-start]").click()').catch(() => undefined);
+    cdp.close();
+    cdp = undefined;
+    await waitFor("the app to restart into the test", 30_000, () => first.exited);
+
+    cdp = await attachWhen(port, "the app restarted in the resource test", 90_000, async (page) => (await menuIds(page)).includes("end-resource-test"));
+    const names = BACKGROUND_TABS.map((tab) => tab.name);
+    let csv;
+    try {
+      csv = await waitFor("samples and page loads of the three accounts in the test file", 90_000, () => {
+        const file = fs.existsSync(folder) && fs.readdirSync(folder).find((name) => name.endsWith(".csv"));
+        if (!file) return null;
+        const text = fs.readFileSync(path.join(folder, file), "utf8");
+        const done = text.includes(",event,window shown") &&
+          names.every((name) => text.includes(`,event,WhatsApp page loaded: ${name}`)) &&
+          names.every((name) => new RegExp(`^[\\d.]+,[^,]+,account,${name},1,`, "m").test(text));
+        return done ? { file, text } : null;
+      });
+    } catch (error) {
+      failures.push(error.message);
+    }
+    if (csv) {
+      if (!csv.text.startsWith("seconds,time,kind,name,processes,cpu_percent,private_mb,working_set_mb")) failures.push("the test file has no header");
+      // Quoted: the description has commas.
+      if (!/,event,"test started: Altus \+ /.test(csv.text)) failures.push("the test file does not say what was tested");
+      notes.push(`${csv.file}: ${csv.text.split(/\r?\n/).filter(Boolean).length} rows after the pages loaded`);
+    }
+
+    // Help → End Resource Test: summary, then a normal restart.
+    await cdp.evaluate('window.clickMenuItem("end-resource-test")').catch(() => undefined);
+    cdp.close();
+    cdp = undefined;
+    let summary;
+    try {
+      summary = await waitFor("the summary file", 30_000, () => {
+        const file = fs.existsSync(folder) && fs.readdirSync(folder).find((name) => name.endsWith(".txt"));
+        return file && fs.readFileSync(path.join(folder, file), "utf8");
+      });
+    } catch (error) {
+      failures.push(error.message);
+    }
+    if (summary) {
+      for (const name of names) if (!summary.includes(`${name}:`)) failures.push(`the summary does not list ${name}`);
+      if (!summary.includes("resource test")) failures.push(`the summary has no title: ${summary.slice(0, 80)}`);
+    }
+    const samples = fs.readdirSync(folder).filter((name) => name.endsWith(".csv"));
+    if (samples.length !== 1 || !fs.readFileSync(path.join(folder, samples[0]), "utf8").includes(",event,test ended")) {
+      failures.push("the test file was not closed with \"test ended\"");
+    }
+    cdp = await attachWhen(port, "the app restarted normally", 90_000, async (page) => (await menuIds(page)).includes("resource-test"));
+  } catch (error) {
+    failures.push(error.message);
+  } finally {
+    cdp?.close();
+    if (!first.exited) await stop(first).catch(() => undefined);
+    // The restarted instances are not children of this script: stop them by PID.
+    for (const pid of instancesOnProfile(profile)) {
+      spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+    }
+    await waitFor("every instance on the test profile to exit", 30_000, () => instancesOnProfile(profile).length === 0)
+      .catch((error) => failures.push(error.message));
+    await sleep(2000);
+    removeTemp(profile);
+  }
+  return { failures, notes };
+}
+
 // Fake data of the original Altus (same file formats as Altus +).
 const ORIGINAL_TABS = [
   ["smokePersonaleTab0001", "Personale"],
@@ -865,7 +1000,7 @@ async function checkInstallReplacingOriginal() {
 async function checkReinstall() {
   const profile = path.join(APPDATA, PROFILE_FOLDER);
   if (!fs.existsSync(path.join(profile, "tabs.json"))) {
-    return { failures: ["no Altus + profile to compare: the migration in check 6 did not create it"], notes: [] };
+    return { failures: ["no Altus + profile to compare: the migration in check 7 did not create it"], notes: [] };
   }
   const before = Object.fromEntries(["settings.json", "tabs.json"].map((file) => [file, readJson(path.join(profile, file))]));
   // Original data shows up again: a reinstall must still leave it alone.
@@ -896,7 +1031,7 @@ async function checkUninstall() {
   } catch (error) {
     failures.push(error.message);
   }
-  if (!profileExisted) failures.push("no Altus + profile to check: the migration in check 6 did not create it");
+  if (!profileExisted) failures.push("no Altus + profile to check: the migration in check 7 did not create it");
   else if (!fs.existsSync(path.join(profile, "tabs.json"))) failures.push("the uninstaller removed the Altus + profile");
   return { failures, notes: [] };
 }
@@ -917,12 +1052,13 @@ const checks = [
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand", checkStartInTray],
   ["5. Three accounts: background sound and notifications, muted account, moving tabs, Resource Usage", checkBackgroundTabs],
+  ["6. Resource test: restart into it, record three accounts, summary, normal restart", checkResourceTest],
 ];
 if (runInstaller) {
   checks.push(
-    ["6. Installer replaces the original Altus; app opens its tabs and settings", checkInstallReplacingOriginal],
-    ["7. Reinstall leaves the profile and the original data alone", checkReinstall],
-    ["8. Uninstall removes the program and keeps the profile", checkUninstall],
+    ["7. Installer replaces the original Altus; app opens its tabs and settings", checkInstallReplacingOriginal],
+    ["8. Reinstall leaves the profile and the original data alone", checkReinstall],
+    ["9. Uninstall removes the program and keeps the profile", checkUninstall],
   );
 }
 
@@ -952,8 +1088,8 @@ for (const [name, check] of checks) {
   console.log(`${result.failures.length ? "FAIL" : "ok  "} ${name} (${seconds}s)`);
   for (const line of result.failures) console.log(`       - ${line}`);
   for (const line of result.notes) console.log(`       ${line}`);
-  // Checks 7 and 8 need the installed app.
-  if (name.startsWith("6.") && !install.exe) blocked = true;
+  // Checks 8 and 9 need the installed app.
+  if (name.startsWith("7.") && !install.exe) blocked = true;
 }
 
 const failed = results.filter((result) => result.failures.length);

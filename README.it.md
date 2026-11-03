@@ -30,7 +30,7 @@ Il progetto originale non riceve più aggiornamenti. Altus + lo mantiene su una 
 | 📥 **Non letti a colpo d'occhio** | Passa il mouse sull'icona nel tray per vedere le chat non lette di ogni account e quali account sono silenziati. |
 | 🔊 **Audio in background** | I vocali continuano a suonare quando cambi scheda; le schede inattive non vengono mai sospese né silenziate. |
 | 📎 **Avviso download** | "Allegato salvato · Mostra nella cartella" dopo ogni download. |
-| 📊 **Uso risorse** | Aiuto → Uso risorse mostra CPU e memoria di ogni account, aggiornate mentre è aperto. |
+| 📊 **Uso risorse** | Aiuto → Uso risorse mostra CPU e memoria di ogni account, aggiornate mentre è aperto. Aiuto → Fai test delle risorse le registra dall'avvio in un file CSV con un riepilogo, finché non lo termini. |
 | 🩹 **Ripristino dai crash** | Un account che si blocca o va in crash si ricarica da solo, senza toccare gli altri. |
 | ⬆️ **Aggiornamenti integrati** | Le nuove versioni si scaricano in background, vengono verificate (SHA512) e si installano con un clic. Durante l'installazione resta visibile un avviso. |
 | 🌐 **English / Italiano** | Impostazioni → Lingua, con effetto immediato. |
