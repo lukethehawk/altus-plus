@@ -16,6 +16,7 @@ import { ChevronRightIcon } from "../icons/ChevronRightIcon";
 import MaximizeIcon from "../icons/MaximizeIcon";
 import RadioBoxMarked from "../icons/RadioBoxMarked";
 import RadioBoxBlank from "../icons/RadioBoxBlank";
+import CheckIcon from "../icons/CheckIcon";
 
 const MenuItem: Component<{
   item: CloneableMenu[number];
@@ -51,6 +52,27 @@ const MenuItem: Component<{
           ) : (
             <RadioBoxBlank class="w-4 h-4 mr-2.5" />
           )}
+          <span class="mr-8 text-left">
+            {props.item.label.replace(/&/g, "")}
+          </span>
+          <Show when={props.item.accelerator}>
+            <span class="ml-auto text-[#c3c3c3]">{props.item.accelerator}</span>
+          </Show>
+        </Menubar.Item>
+      </Match>
+      <Match when={props.item.type === "checkbox"}>
+        <Menubar.Item
+          onSelect={() =>
+            window.clickMenuItem(
+              props.item.id || props.item.commandId.toString()
+            )
+          }
+          class="flex items-center w-full py-1.5 px-3 hover:bg-white/10 focus:bg-white/20 select-none outline-none"
+        >
+          <CheckIcon
+            class="w-4 h-4 mr-2.5"
+            classList={{ invisible: !props.item.checked }}
+          />
           <span class="mr-8 text-left">
             {props.item.label.replace(/&/g, "")}
           </span>

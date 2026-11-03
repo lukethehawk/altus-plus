@@ -18,6 +18,8 @@ const loadSettingsStore = () =>
 void loadSettingsStore();
 // The language can also change from the Edit menu, which saves it in main.
 window.electronIPCHandlers.onReloadTranslations(() => void loadSettingsStore());
+// So can "Allow Moving Tabs" in the Tab menu.
+window.electronIPCHandlers.onReloadSettings(() => void loadSettingsStore());
 
 export function getSettingValue<Key extends SettingKey>(
   key: Key

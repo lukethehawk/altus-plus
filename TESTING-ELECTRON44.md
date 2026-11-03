@@ -121,6 +121,13 @@ logged in.
     the tab badge. A muted account ends with "(muted)" ("(silenziato)" in
     Italian) until the mute expires. Renaming, reordering or closing a tab
     and switching language update it.
+15. **Moving tabs:** by default dragging a tab does nothing. Tab → Allow
+    Moving Tabs ticks the item; then dragging a tab onto another shows a
+    blue line on the side it will land and moves it there on release, and
+    the order survives a restart. Dropping a tab on the WhatsApp page or
+    outside the window changes nothing. Unticking it stops dragging again,
+    and the choice survives a restart. With the custom title bar on, the
+    item shows a tick too.
 
 ### Automated smoke test
 
@@ -146,7 +153,11 @@ fails it uploads no installer.
      both as playing, so neither was stopped or suspended. No tab is muted,
      which is checked on its own: Chromium reports a muted tab as playing
      too;
-   - with the window shown, switching to Beta leaves Alfa's tone playing.
+   - with the window shown, switching to Beta leaves Alfa's tone playing;
+   - with the window shown, dragging Alfa onto Gamma does nothing while
+     "Allow Moving Tabs" is off (the default). Turned on with the setting
+     the menu item saves, the item is ticked, and the same drag moves Alfa
+     after Gamma, in the window and in `tabs.json`.
 
    Where the machine has no audio output (the selected tab is not reported
    as playing either), only the playing check is skipped, with a note. Run

@@ -530,6 +530,19 @@ function pruneUnusedPartitions(
   }
 }
 
+/**
+ * "Allow Moving Tabs" (Tab menu): saves it, ticks the menu item and lets the
+ * tab bar know, whether it changed from the menu or from the window.
+ */
+function setTabReordering(enabled: boolean) {
+  electronSettingsStore.set("tabReordering", { value: enabled });
+  Menu.setApplicationMenu(getLocalizedMainMenu());
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send("reload-custom-title-bar");
+    window.webContents.send("reload-settings");
+  }
+}
+
 function changeAutoHideMenuBar(mainWindow: BrowserWindow, value: boolean) {
   mainWindow.setAutoHideMenuBar(value);
   mainWindow.setMenuBarVisibility(!value);
@@ -621,6 +634,9 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
       } else if (key === "language") {
         // Saves the setting and relabels the menus, tray and window.
         electronI18N.setLanguage(value as Language);
+        return;
+      } else if (key === "tabReordering") {
+        setTabReordering(value as boolean);
         return;
       }
       return electronSettingsStore.set(key, { value });
@@ -1091,6 +1107,18 @@ function getLocalizedMainMenu() {
             if (window) window.webContents.send("last-tab");
           },
           id: "last-tab",
+        },
+        {
+          type: "separator",
+        },
+        {
+          label: electronI18N.t("Allow Moving Tabs"),
+          type: "checkbox",
+          checked: getSettingWithDefault("tabReordering"),
+          click() {
+            setTabReordering(!getSettingWithDefault("tabReordering"));
+          },
+          id: "allow-moving-tabs",
         },
       ],
     },
