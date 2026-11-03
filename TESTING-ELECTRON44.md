@@ -132,18 +132,33 @@ fails it uploads no installer.
 4. With "Start in tray with Windows" on, a start with `--hidden` (what the
    autostart entry runs) shows no window, yet the tab reaches WhatsApp
    Web. A start without it shows the window.
-5. `Setup.exe /S --replace-altus` with fake original Altus data (Italian,
+5. Three tabs: "Alfa" selected, "Beta" and "Gamma" in the background,
+   Gamma with notifications muted. Run with the window shown and again
+   started into the tray (`--hidden`):
+   - a notification from Beta is real, titled "Beta · …", and its
+     permission is granted; Gamma's is replaced by the silent stand-in;
+   - a tone started in Alfa and in Beta keeps running and Chromium reports
+     both as playing, so neither was stopped or suspended. No tab is muted,
+     which is checked on its own: Chromium reports a muted tab as playing
+     too;
+   - with the window shown, switching to Beta leaves Alfa's tone playing.
+
+   Where the machine has no audio output (the selected tab is not reported
+   as playing either), only the playing check is skipped, with a note. Run
+   locally, the check plays a near-silent tone and shows a silent
+   notification for a moment.
+6. `Setup.exe /S --replace-altus` with fake original Altus data (Italian,
    tabs "Personale" and "Lavoro", autostart on):
    - the profile is copied and the backup folder is created;
    - the installed app opens those tabs, in Italian, on the original
      partitions;
    - the app's autostart entry runs the installed exe with `--hidden`.
-6. A reinstall changes neither the Altus + profile nor the original data.
-7. Uninstalling removes the program and keeps the profile.
+7. A reinstall changes neither the Altus + profile nor the original data.
+8. Uninstalling removes the program and keeps the profile.
 
 Failures attach logs and screenshots (`smoke-artifacts`) to the run. Checks
-5-7 install and uninstall for real, so they only run on GitHub's throwaway
-runners. Locally, `yarn package -p win32` then `yarn smoke` runs checks 1-4
+6-8 install and uninstall for real, so they only run on GitHub's throwaway
+runners. Locally, `yarn package -p win32` then `yarn smoke` runs checks 1-5
 on a temporary profile.
 
 ### Packaged smoke run without touching your profile
