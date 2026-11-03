@@ -110,6 +110,7 @@
   "Mute notifications for 8 hours": "Mute notifications for 8 hours",
   "Mute notifications until turned back on": "Mute notifications until turned back on",
   "Unmute notifications": "Unmute notifications",
+  "trayMuted": "muted",
   "checkForUpdates": "Check for updates at startup",
   "checkForUpdatesDescription": "Looks for a new Altus + release on GitHub, downloads it in the background and installs it when you restart or quit the app.",
   "Could not check for updates": "Could not check for updates",
