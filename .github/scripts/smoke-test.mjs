@@ -12,7 +12,8 @@
 // 5. tabs in the background, also with the whole app in the tray, keep
 //    playing sound (also after switching tab) and show notifications labelled
 //    with their account, and a muted account's notification is suppressed.
-//    Tabs move by dragging only once "Allow Moving Tabs" is on.
+//    Tabs move by dragging only once "Allow Moving Tabs" is on, and
+//    Help → Resource Usage lists every account.
 //    It plays a near-silent tone and shows a silent notification for a moment;
 // 6. the installer replaces a fake original Altus (/S --replace-altus), the
 //    installed app opens its tabs and settings and registers autostart;
@@ -528,6 +529,47 @@ async function dragTab(cdp, fromId, toId) {
 }
 
 /**
+ * Help → Resource Usage lists every account with its own process and the
+ * app's main process and window, then closes.
+ */
+async function checkResourcePanel(cdp, failures, notes) {
+  await cdp.evaluate('window.clickMenuItem("resource-usage")');
+  const rows = () => cdp.evaluate(`[...document.querySelectorAll("[data-resource-row]")].map((row) => ({
+    kind: row.dataset.kind,
+    tabId: row.dataset.tabId ?? null,
+    privateMB: Number(row.dataset.privateMb),
+    processes: Number(row.dataset.processes),
+  }))`);
+  let shown;
+  try {
+    shown = await waitFor("Resource Usage to list every account with its memory", 15_000, async () => {
+      const value = await rows();
+      const accounts = value.filter((row) => row.kind === "account");
+      return accounts.length === BACKGROUND_TABS.length && accounts.every((row) => row.processes > 0 && row.privateMB > 0)
+        ? value
+        : null;
+    });
+  } catch (error) {
+    failures.push(`Resource Usage: ${error.message} (rows: ${JSON.stringify(await rows().catch(() => []))})`);
+    return;
+  }
+  const accountIds = shown.filter((row) => row.kind === "account").map((row) => row.tabId);
+  if (!sameJson([...accountIds].sort(), BACKGROUND_TABS.map((tab) => tab.id).sort())) {
+    failures.push(`Resource Usage lists accounts ${accountIds.join(", ")}`);
+  }
+  for (const kind of ["main", "window"]) {
+    if (!shown.some((row) => row.kind === kind && row.privateMB > 0)) failures.push(`Resource Usage has no ${kind} row`);
+  }
+  notes.push(`Resource Usage: ${shown.map((row) => `${row.tabId ? BACKGROUND_TABS.find((tab) => tab.id === row.tabId)?.name : row.kind} ${Math.round(row.privateMB)} MB`).join(", ")}`);
+  await cdp.evaluate('document.querySelector("[data-resource-usage-close]").click()');
+  try {
+    await waitFor("Resource Usage to close", 5_000, async () => !(await cdp.evaluate('!!document.querySelector("[data-resource-usage]")')));
+  } catch (error) {
+    failures.push(error.message);
+  }
+}
+
+/**
  * Moving tabs is off by default; turned on (as the Tab menu does), a tab
  * dropped on another moves there and the order is saved.
  */
@@ -648,6 +690,7 @@ function exerciseBackgroundTabs(run, audio, profile) {
         if (audio.monitored) await expectAudible(ALFA, "after switching to Beta");
 
         await checkMovingTabs(cdp, profile, failures);
+        await checkResourcePanel(cdp, failures, notes);
       }
     } catch (error) {
       failures.push(error.message);
@@ -873,7 +916,7 @@ const checks = [
   ["2. Modified app.asar is refused", checkTamperedAsar],
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand", checkStartInTray],
-  ["5. Background tabs keep sound and notifications; a muted account stays quiet; tabs move only when allowed", checkBackgroundTabs],
+  ["5. Three accounts: background sound and notifications, muted account, moving tabs, Resource Usage", checkBackgroundTabs],
 ];
 if (runInstaller) {
   checks.push(

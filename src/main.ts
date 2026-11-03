@@ -10,6 +10,7 @@ import {
   session,
   shell,
   Tray,
+  webContents,
 } from "electron";
 import fs from "fs";
 import path from "path";
@@ -50,6 +51,7 @@ import { AUTOSTART_FLAG, autostartPathFor, getStartupWindowMode } from "./utils/
 import { attachEnterKeys } from "./utils/keyboard";
 import { isMuteActive } from "./utils/notifications";
 import { formatTrayTooltip } from "./utils/tray";
+import { groupProcessUsage } from "./utils/resources";
 import {
   checkForUpdates,
   installDownloadedUpdate,
@@ -114,6 +116,44 @@ function updateTrayTooltip(tabs?: Tab[]) {
   } catch (error) {
     console.warn("Could not update the tray tooltip", error);
   }
+}
+
+/** CPU and memory of each account and of the app's own processes, now. */
+function sampleResourceUsage(mainWindow: BrowserWindow) {
+  const tabs = electronTabStore.get("tabs");
+  const pidByTab = new Map<string, number>();
+  // Chromium's own process IDs, which service workers are reported with.
+  const pageProcessIds = new Set<number>();
+  for (const contents of webContents.getAllWebContents()) {
+    if (contents.isDestroyed()) continue;
+    pageProcessIds.add(contents.getProcessId());
+    if (contents.getType() !== "webview") continue;
+    const tab = tabs.find((tab) => contents.session === session.fromPartition(`persist:${tab.id}`));
+    if (tab) pidByTab.set(tab.id, contents.getOSProcessId());
+  }
+  const workerProcessIds = new Set<number>();
+  for (const tab of tabs) {
+    const running = session.fromPartition(`persist:${tab.id}`).serviceWorkers.getAllRunning();
+    for (const worker of Object.values(running)) {
+      if (!pageProcessIds.has(worker.renderProcessId)) workerProcessIds.add(worker.renderProcessId);
+    }
+  }
+  const processes = app.getAppMetrics().map((metric) => ({
+    pid: metric.pid,
+    type: metric.type,
+    serviceName: metric.serviceName,
+    cpuPercent: metric.cpu.percentCPUUsage,
+    privateKB: metric.memory.privateBytes,
+    workingSetKB: metric.memory.workingSetSize,
+  }));
+  return groupProcessUsage(
+    processes,
+    {
+      accounts: tabs.map((tab) => ({ tabId: tab.id, name: tab.name, pid: pidByTab.get(tab.id) })),
+      windowPid: mainWindow.isDestroyed() ? undefined : mainWindow.webContents.getOSProcessId(),
+      workerProcesses: workerProcessIds.size,
+    }
+  );
 }
 
 // Recently completed downloads by id: the UI asks to reveal an id, so a file
@@ -659,6 +699,9 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     }
   );
 
+  // Polled by the Resource Usage panel while it is open.
+  handle("get-resource-usage", () => sampleResourceUsage(mainWindow));
+
   handle("theme-store-get", () => {
     return electronThemeStore.store;
   });
@@ -756,8 +799,8 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     if (!menu) return;
     const item = menu.getMenuItemById(id);
     if (!item) return;
-    const focusedWindow = BrowserWindow.getFocusedWindow();
-    if (!focusedWindow) return;
+    // The click comes from the app window, focused or not.
+    const focusedWindow = BrowserWindow.getFocusedWindow() ?? mainWindow;
     const focusedWebContents = focusedWindow.webContents;
     item.click(undefined, focusedWindow, focusedWebContents);
   });
@@ -1198,6 +1241,14 @@ ${aboutDialogText}`,
             checkForUpdates({ interactive: true }).catch(console.error);
           },
           id: "check-for-updates",
+        },
+        {
+          label: electronI18N.t("Resource Usage"),
+          click() {
+            const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+            if (window) window.webContents.send("open-resource-usage");
+          },
+          id: "resource-usage",
         },
         {
           label: electronI18N.t("Links"),

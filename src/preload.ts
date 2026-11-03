@@ -119,6 +119,10 @@ const ipcHandlers: ElectronIPCHandlers = {
     ipcRenderer.on("open-theme-manager", callback);
     return () => ipcRenderer.off("open-theme-manager", callback);
   },
+  onOpenResourceUsage: (callback) => {
+    ipcRenderer.on("open-resource-usage", callback);
+    return () => ipcRenderer.off("open-resource-usage", callback);
+  },
   onMessageCount: (callback) => {
     const handler = (
       _: IpcRendererEvent,
@@ -153,6 +157,10 @@ contextBridge.exposeInMainWorld(
   (options: MessageBoxOptions) => {
     return ipcRenderer.invoke("show-message-box", options);
   }
+);
+
+contextBridge.exposeInMainWorld("getResourceUsage", () =>
+  ipcRenderer.invoke("get-resource-usage")
 );
 
 contextBridge.exposeInMainWorld("getAppMenu", () =>
