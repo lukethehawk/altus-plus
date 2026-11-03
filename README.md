@@ -88,7 +88,7 @@ Altus + loads WhatsApp Web and nothing else in its tabs. Its only other connecti
 | **Executable** | Electron fuses turn off `RunAsNode`, `NODE_OPTIONS` and `--inspect`, so other programs cannot use the Altus + executable to run their own code. |
 | **Integrity** | At startup the app checks its own package (`app.asar`) and refuses to start if it has been modified. |
 | **Updates** | Downloaded only from this repository's releases and installed only if the SHA512 matches. |
-| **Dependencies** | A weekly audit fails on new high or critical advisories in the app's dependencies and on any Electron advisory; Dependabot proposes security fixes. A daily check flags each new Electron release, which carries Chromium's security fixes, and the end of support of the Electron version in use. Known advisories and why they do not affect the app are listed in [`docs/DEPENDENCY-AUDIT-ELECTRON44.md`](docs/DEPENDENCY-AUDIT-ELECTRON44.md). |
+| **Dependencies** | A weekly audit fails on new high or critical advisories in the app's dependencies and on any Electron advisory; Dependabot proposes security fixes. A weekly check flags each new Electron release, which carries Chromium's security fixes, and the end of support of the Electron version in use. Known advisories and why they do not affect the app are listed in [`docs/DEPENDENCY-AUDIT-ELECTRON44.md`](docs/DEPENDENCY-AUDIT-ELECTRON44.md). |
 
 Not done yet: the installer is not code-signed, and session cookies are stored the way Chromium stores them by default (not encrypted). Found a security problem? Please report it through a [private security advisory](https://github.com/lukethehawk/altus-plus/security/advisories/new) rather than a public issue.
 
