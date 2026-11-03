@@ -52,7 +52,7 @@
     "@types/auto-launch": "^5.0.3",
     "@typescript-eslint/eslint-plugin": "^5.0.0",
     "@typescript-eslint/parser": "^5.0.0",
-    "app-builder-lib": "^26.0.12",
+    "app-builder-lib": "patch:app-builder-lib@npm%3A26.0.12#~/.yarn/patches/app-builder-lib-npm-26.0.12-30c9e1508c.patch",
     "autoprefixer": "^10.4.15",
     "dmg-builder": "^26.0.12",
     "electron": "44.10.1",
@@ -79,5 +79,8 @@
     "tailwind-merge": "^3.2.0",
     "zod": "4.6.6"
   },
-  "packageManager": "yarn@4.9.0"
+  "packageManager": "yarn@4.9.0",
+  "resolutions": {
+    "app-builder-lib@npm:26.0.12": "patch:app-builder-lib@npm%3A26.0.12#~/.yarn/patches/app-builder-lib-npm-26.0.12-30c9e1508c.patch"
+  }
 }
