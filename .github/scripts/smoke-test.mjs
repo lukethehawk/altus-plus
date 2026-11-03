@@ -1,7 +1,7 @@
 // Smoke test of the packaged Windows app, run by CI after `yarn make`.
 //
-//   node .github/scripts/smoke-test.mjs              checks 1-4 (`yarn smoke`)
-//   node .github/scripts/smoke-test.mjs --installer  checks 1-7
+//   node .github/scripts/smoke-test.mjs              checks 1-5 (`yarn smoke`)
+//   node .github/scripts/smoke-test.mjs --installer  checks 1-8
 //
 // 1. fuses baked into the executable;
 // 2. a modified app.asar is refused at startup;
@@ -9,12 +9,16 @@
 //    with no errors in the app window;
 // 4. "Start in tray with Windows": started with the autostart flag the window
 //    stays hidden while the tab still loads; started by hand it opens;
-// 5. the installer replaces a fake original Altus (/S --replace-altus), the
+// 5. tabs in the background, also with the whole app in the tray, keep
+//    playing sound (also after switching tab) and show notifications labelled
+//    with their account, and a muted account's notification is suppressed.
+//    It plays a near-silent tone and shows a silent notification for a moment;
+// 6. the installer replaces a fake original Altus (/S --replace-altus), the
 //    installed app opens its tabs and settings and registers autostart;
-// 6. reinstalling never migrates again or touches the Altus + profile;
-// 7. uninstalling removes the program and keeps the profile.
+// 7. reinstalling never migrates again or touches the Altus + profile;
+// 8. uninstalling removes the program and keeps the profile.
 //
-// Checks 5-7 install Altus +, write %APPDATA% and uninstall, so they only run
+// Checks 6-8 install Altus +, write %APPDATA% and uninstall, so they only run
 // on a GitHub-hosted runner, which is discarded afterwards. The app is
 // observed through Chromium's DevTools protocol (--remote-debugging-port) and
 // stopped by PID. Failures leave logs and screenshots in smoke-artifacts/.
@@ -201,7 +205,8 @@ const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 /**
  * Starts the app, reloads its window with DevTools attached and checks the
  * window, its tabs and every tab's WhatsApp Web page. Returns failure messages.
- * expected: { label, otherLabel, tabNames, tabIds? (exact, in any order), tabCount }
+ * expected: { label, otherLabel, tabNames, tabIds? (exact, in any order), tabCount,
+ *   windowShown, afterLoad?({ cdp, port, failures, notes }) }
  */
 async function checkRunningApp(name, exe, args, expected, port) {
   const failures = [];
@@ -257,6 +262,7 @@ async function checkRunningApp(name, exe, args, expected, port) {
     if (expected.tabIds && !sameJson([...tabIds].sort(), [...expected.tabIds].sort())) {
       failures.push(`tab IDs ${tabIds.join(", ")} instead of ${expected.tabIds.join(", ")}`);
     }
+    const loadFailures = failures.length;
 
     // Each tab reaches WhatsApp Web and its preload reports the tab's ID.
     for (const id of tabIds) {
@@ -284,6 +290,11 @@ async function checkRunningApp(name, exe, args, expected, port) {
           failures.push(error.message);
         }
       }
+    }
+
+    // Further checks on the loaded tabs, unless they did not all load.
+    if (expected.afterLoad && failures.length === loadFailures) {
+      await expected.afterLoad({ cdp, port, failures, notes });
     }
 
     await sleep(3000);
@@ -411,6 +422,191 @@ async function checkStartInTray() {
   };
 }
 
+// --- check 5: background tabs ----------------------------------------------
+
+// Alfa is selected; Beta and Gamma are in the background, Gamma muted.
+const BACKGROUND_TABS = [
+  ["smokeAlfaTab000000001", "Alfa", {}],
+  ["smokeBetaTab000000002", "Beta", {}],
+  ["smokeGammaTab00000003", "Gamma", { notificationsMutedUntil: Number.MAX_SAFE_INTEGER }],
+].map(([id, name, config]) => ({
+  id,
+  name,
+  messageCount: 0,
+  config: { theme: "dark", notifications: true, media: true, sound: true, color: null, spellChecker: true, ...config },
+}));
+const [ALFA, BETA, GAMMA] = BACKGROUND_TABS;
+
+/** DevTools connection to the WhatsApp page of a tab; the caller closes it. */
+async function connectToTab(port, id) {
+  for (const target of await targets(port)) {
+    if (target.type !== "webview" || !target.url.startsWith("https://web.whatsapp.com/")) continue;
+    const page = await Cdp.connect(target.webSocketDebuggerUrl);
+    const tabId = await page.evaluate("document.body?.dataset.tabId ?? null").catch(() => null);
+    if (tabId === id) return page;
+    page.close();
+  }
+  throw new Error(`no WhatsApp page for tab ${id}`);
+}
+
+// A 440 Hz tone at about -57 dBFS: above the level Chromium counts as
+// audible, too quiet to hear when the test runs on a real PC.
+const START_TONE = `(async () => {
+  const context = new AudioContext();
+  const gain = context.createGain();
+  gain.gain.value = 0.002;
+  const oscillator = context.createOscillator();
+  oscillator.connect(gain).connect(context.destination);
+  oscillator.start();
+  window.smokeTone = context;
+  const start = context.currentTime;
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  return { state: context.state, advanced: context.currentTime - start, visibility: document.visibilityState };
+})()`;
+const TONE_STATE = `(async () => {
+  const context = window.smokeTone;
+  const start = context.currentTime;
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  return { state: context.state, advanced: context.currentTime - start, visibility: document.visibilityState };
+})()`;
+const STOP_TONE = "window.smokeTone?.close()";
+
+/** A notification from a page, as WhatsApp Web creates them; closed at once. */
+const NOTIFY = `(async () => {
+  const permission = Notification.permission;
+  const requested = await Notification.requestPermission();
+  const notification = new Notification("Smoke", { body: "Altus + smoke test", silent: true });
+  const event = await new Promise((resolve) => {
+    for (const type of ["show", "error", "close"]) notification.addEventListener(type, () => resolve(type));
+    setTimeout(() => resolve("none"), 5000);
+  });
+  notification.close();
+  // The muted stand-in is not an instance of the browser's Notification.
+  const real = notification instanceof Object.getPrototypeOf(Notification);
+  return { permission, requested, title: notification.title, real, event };
+})()`;
+
+const webviewCall = (id, method) => `document.getElementById(${JSON.stringify(`webview-${id}`)}).${method}()`;
+
+/**
+ * Background tabs keep their sound and notifications. Chromium reports a tab
+ * as audible while its stream plays, even when the tab is muted, so muting is
+ * checked separately. Audibility is compared with the selected tab: a runner
+ * without audio output reports no tab as audible, which is noted rather than
+ * failed.
+ */
+function exerciseBackgroundTabs(run, audio) {
+  return async ({ cdp, port, failures, notes }) => {
+    const pages = {};
+    try {
+      for (const tab of BACKGROUND_TABS) pages[tab.id] = await connectToTab(port, tab.id);
+      await sleep(1000); // the account name and mute arrive with the tab ID
+
+      const notified = await pages[BETA.id].evaluate(NOTIFY);
+      if (notified.permission !== "granted" || notified.requested !== "granted") {
+        failures.push(`Beta: notification permission is ${notified.permission}, request answered ${notified.requested}`);
+      }
+      if (!notified.real) failures.push("Beta: the notification was suppressed although Beta is not muted");
+      if (notified.title !== "Beta · Smoke") failures.push(`Beta: notification title is "${notified.title}", expected "Beta · Smoke"`);
+      if (notified.event === "error") failures.push("Beta: the notification reported an error");
+      notes.push(`${run}: Beta notification ${notified.event === "show" ? "shown" : `event: ${notified.event}`}`);
+
+      const muted = await pages[GAMMA.id].evaluate(NOTIFY);
+      if (muted.real) failures.push("Gamma: muted, but a real notification was created");
+      if (muted.title !== "Smoke") failures.push(`Gamma: stand-in title is "${muted.title}"`);
+      if (muted.event !== "close") failures.push(`Gamma: the stand-in did not report itself closed (${muted.event})`);
+
+      for (const tab of [ALFA, BETA]) {
+        const tone = await pages[tab.id].evaluate(START_TONE);
+        if (tone.state !== "running" || tone.advanced < 1) {
+          failures.push(`${tab.name}: audio is ${tone.state}, advanced ${tone.advanced.toFixed(2)}s in 2s (page ${tone.visibility})`);
+        }
+        if (tab === BETA) notes.push(`${run}: Beta page visibilityState ${tone.visibility}`);
+      }
+      for (const tab of BACKGROUND_TABS) {
+        if (await cdp.evaluate(webviewCall(tab.id, "isAudioMuted"))) failures.push(`${tab.name}: the tab's audio is muted`);
+      }
+
+      const audible = (tab) => cdp.evaluate(webviewCall(tab.id, "isCurrentlyAudible"));
+      const expectAudible = async (tab, when) => {
+        try {
+          await waitFor(`${tab.name} to be audible`, 10_000, () => audible(tab));
+        } catch {
+          failures.push(`${tab.name}: no sound ${when}`);
+        }
+      };
+      if (audio.monitored === undefined) {
+        // The selected tab of the visible window shows whether this machine has audio output.
+        audio.monitored = await waitFor("the selected tab to be audible", 10_000, () => audible(ALFA)).catch(() => false);
+        if (!audio.monitored) notes.push("no tab is reported audible on this machine (no audio output?): sound not checked");
+      }
+      if (audio.monitored) {
+        await expectAudible(ALFA, "in the selected tab");
+        await expectAudible(BETA, "in a background tab");
+      }
+
+      if (run === "window shown") {
+        // A voice message keeps playing when another account is opened.
+        await cdp.evaluate(`document.getElementById(${JSON.stringify(BETA.id)}).click()`);
+        await waitFor("Beta to be selected", 10_000, () =>
+          cdp.evaluate(`document.getElementById(${JSON.stringify(BETA.id)}).getAttribute("aria-selected") === "true"`));
+        const tone = await pages[ALFA.id].evaluate(TONE_STATE);
+        if (tone.state !== "running" || tone.advanced < 1) {
+          failures.push(`Alfa after switching to Beta: audio is ${tone.state}, advanced ${tone.advanced.toFixed(2)}s in 2s`);
+        }
+        if (await cdp.evaluate(webviewCall(ALFA.id, "isAudioMuted"))) failures.push("Alfa after switching to Beta: audio muted");
+        if (audio.monitored) await expectAudible(ALFA, "after switching to Beta");
+      }
+    } catch (error) {
+      failures.push(error.message);
+    } finally {
+      for (const page of Object.values(pages)) {
+        await page.evaluate(STOP_TONE).catch(() => undefined);
+        page.close();
+      }
+    }
+  };
+}
+
+async function checkBackgroundTabs() {
+  const profile = fs.mkdtempSync(path.join(TEMP, "as-p-"));
+  const seed = (settings) => {
+    fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify(settings));
+    fs.writeFileSync(path.join(profile, "tabs.json"), JSON.stringify({
+      tabs: BACKGROUND_TABS, previouslyClosedTab: null, selectedTabId: ALFA.id,
+    }));
+  };
+  const expected = {
+    label: ADD_TAB_LABEL.en,
+    otherLabel: ADD_TAB_LABEL.it,
+    tabNames: BACKGROUND_TABS.map((tab) => tab.name),
+    tabIds: BACKGROUND_TABS.map((tab) => tab.id),
+    tabCount: BACKGROUND_TABS.length,
+  };
+  const audio = {};
+  seed({});
+  const shown = await checkRunningApp("background-tabs", PACKAGED_EXE, [`--user-data-dir=${profile}`], {
+    ...expected,
+    windowShown: true,
+    afterLoad: exerciseBackgroundTabs("window shown", audio),
+  }, 9415);
+  // Started with Windows into the tray: every tab is in a hidden window.
+  seed({ launchToTray: { value: true } });
+  const inTray = await checkRunningApp("background-tabs-tray", PACKAGED_EXE, [`--user-data-dir=${profile}`, "--hidden"], {
+    ...expected,
+    windowShown: false,
+    afterLoad: exerciseBackgroundTabs("in the tray", audio),
+  }, 9416);
+  removeTemp(profile);
+  return {
+    failures: [
+      ...shown.failures.map((line) => `window shown: ${line}`),
+      ...inTray.failures.map((line) => `in the tray: ${line}`),
+    ],
+    notes: [...shown.notes, ...inTray.notes],
+  };
+}
+
 // Fake data of the original Altus (same file formats as Altus +).
 const ORIGINAL_TABS = [
   ["smokePersonaleTab0001", "Personale"],
@@ -534,7 +730,7 @@ async function checkInstallReplacingOriginal() {
 async function checkReinstall() {
   const profile = path.join(APPDATA, PROFILE_FOLDER);
   if (!fs.existsSync(path.join(profile, "tabs.json"))) {
-    return { failures: ["no Altus + profile to compare: the migration in check 5 did not create it"], notes: [] };
+    return { failures: ["no Altus + profile to compare: the migration in check 6 did not create it"], notes: [] };
   }
   const before = Object.fromEntries(["settings.json", "tabs.json"].map((file) => [file, readJson(path.join(profile, file))]));
   // Original data shows up again: a reinstall must still leave it alone.
@@ -565,7 +761,7 @@ async function checkUninstall() {
   } catch (error) {
     failures.push(error.message);
   }
-  if (!profileExisted) failures.push("no Altus + profile to check: the migration in check 5 did not create it");
+  if (!profileExisted) failures.push("no Altus + profile to check: the migration in check 6 did not create it");
   else if (!fs.existsSync(path.join(profile, "tabs.json"))) failures.push("the uninstaller removed the Altus + profile");
   return { failures, notes: [] };
 }
@@ -585,12 +781,13 @@ const checks = [
   ["2. Modified app.asar is refused", checkTamperedAsar],
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand", checkStartInTray],
+  ["5. Background tabs keep sound and notifications; a muted account stays quiet", checkBackgroundTabs],
 ];
 if (runInstaller) {
   checks.push(
-    ["5. Installer replaces the original Altus; app opens its tabs and settings", checkInstallReplacingOriginal],
-    ["6. Reinstall leaves the profile and the original data alone", checkReinstall],
-    ["7. Uninstall removes the program and keeps the profile", checkUninstall],
+    ["6. Installer replaces the original Altus; app opens its tabs and settings", checkInstallReplacingOriginal],
+    ["7. Reinstall leaves the profile and the original data alone", checkReinstall],
+    ["8. Uninstall removes the program and keeps the profile", checkUninstall],
   );
 }
 
@@ -620,8 +817,8 @@ for (const [name, check] of checks) {
   console.log(`${result.failures.length ? "FAIL" : "ok  "} ${name} (${seconds}s)`);
   for (const line of result.failures) console.log(`       - ${line}`);
   for (const line of result.notes) console.log(`       ${line}`);
-  // Checks 6 and 7 need the installed app.
-  if (name.startsWith("5.") && !install.exe) blocked = true;
+  // Checks 7 and 8 need the installed app.
+  if (name.startsWith("6.") && !install.exe) blocked = true;
 }
 
 const failed = results.filter((result) => result.failures.length);
