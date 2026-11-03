@@ -48,6 +48,8 @@ import { recoverRendererOnFailure } from "./utils/rendererRecovery";
 import { REPOSITORY_URL } from "./utils/updates";
 import { AUTOSTART_FLAG, autostartPathFor, getStartupWindowMode } from "./utils/startup";
 import { attachEnterKeys } from "./utils/keyboard";
+import { isMuteActive } from "./utils/notifications";
+import { formatTrayTooltip } from "./utils/tray";
 import {
   checkForUpdates,
   installDownloadedUpdate,
@@ -86,6 +88,33 @@ function getSettingWithDefault<Key extends SettingKey>(
 }
 
 let tray: Tray | undefined;
+let trayTooltip = "";
+
+// Unread chats per account, as counted in each WhatsApp page title.
+const unreadByTab = new Map<string, number>();
+
+/** Hovering the tray icon shows the unread chats of every account. */
+function updateTrayTooltip(tabs?: Tab[]) {
+  if (!tray || tray.isDestroyed()) return;
+  // Only a label: it must never break the unread badge or saving the tabs.
+  try {
+    const now = Date.now();
+    const text = formatTrayTooltip(
+      APP_NAME,
+      (tabs ?? electronTabStore.get("tabs")).map((tab) => ({
+        name: typeof tab.name === "string" ? tab.name : "",
+        unread: unreadByTab.get(tab.id) ?? 0,
+        muted: isMuteActive(tab.config?.notificationsMutedUntil, now),
+      })),
+      electronI18N.t("trayMuted")
+    );
+    if (text === trayTooltip) return;
+    trayTooltip = text;
+    tray.setToolTip(text);
+  } catch (error) {
+    console.warn("Could not update the tray tooltip", error);
+  }
+}
 
 // Recently completed downloads by id: the UI asks to reveal an id, so a file
 // path never travels back from the renderer to the main process.
@@ -523,7 +552,10 @@ function toggleTray(mainWindow: BrowserWindow, enabled: boolean) {
         })
       : trayIcon
   );
-  tray.setToolTip(APP_NAME);
+  trayTooltip = "";
+  updateTrayTooltip();
+  // A timed mute may have ended since the last update.
+  tray.on("mouse-enter", () => updateTrayTooltip());
   tray.setContextMenu(getLocalizedTrayMenu());
   tray.on("click", () => {
     if (process.platform !== "darwin") {
@@ -604,8 +636,10 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     (event, key: keyof TabStore, value: unknown) => {
       if (event.sender !== mainWindow.webContents) throw new Error("Unauthorized tab sender");
       if (!["tabs", "selectedTabId", "previouslyClosedTab"].includes(key)) throw new Error("Invalid tab store key");
-      if (value === undefined) return electronTabStore.delete(key);
-      return electronTabStore.set(key, value);
+      if (value === undefined) electronTabStore.delete(key);
+      else electronTabStore.set(key, value);
+      // Names, order and mutes of the accounts.
+      if (key === "tabs") updateTrayTooltip();
     }
   );
 
@@ -769,20 +803,21 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     }
   });
 
-  const unreadByTab = new Map<string, number>();
   ipcMain.on("message-count", (event, detail: unknown) => {
     if (event.sender.getType() !== "webview" || !isTrustedWhatsAppURL(event.sender.getURL())) return;
     if (!detail || typeof detail !== "object") return;
     const { tabId, messageCount } = detail as { tabId?: unknown; messageCount?: unknown };
     if (typeof tabId !== "string" || !Number.isSafeInteger(messageCount) ||
         (messageCount as number) < 0 || (messageCount as number) > 100000) return;
-    const activeIds = new Set(electronTabStore.get("tabs").map((tab) => tab.id));
+    const tabs = electronTabStore.get("tabs");
+    const activeIds = new Set(tabs.map((tab) => tab.id));
     if (!activeIds.has(tabId)) return;
     for (const id of unreadByTab.keys()) {
       if (!activeIds.has(id)) unreadByTab.delete(id);
     }
     unreadByTab.set(tabId, messageCount as number);
     mainWindow.webContents.send("message-count", { tabId, messageCount });
+    updateTrayTooltip(tabs);
     if (!getSettingWithDefault("notificationBadge")) {
       return;
     }
@@ -849,6 +884,7 @@ async function initializeI18N(mainWindow: BrowserWindow) {
     Menu.setApplicationMenu(menu);
     if (tray && !tray.isDestroyed()) {
       tray.setContextMenu(getLocalizedTrayMenu());
+      updateTrayTooltip();
     }
     if (process.platform === "darwin" && tray) {
       app.dock?.setMenu(getLocalizedTrayMenu());

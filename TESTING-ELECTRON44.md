@@ -116,6 +116,11 @@ logged in.
 
     `yarn test:keys` (also run in CI) checks the same key handling in an
     Electron window.
+14. **Tray tooltip:** hovering the tray icon shows "Altus +" and one line per
+    account in tab order, "<tab name>: <unread chats>", the same number as
+    the tab badge. A muted account ends with "(muted)" ("(silenziato)" in
+    Italian) until the mute expires. Renaming, reordering or closing a tab
+    and switching language update it.
 
 ### Automated smoke test
 
