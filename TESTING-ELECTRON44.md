@@ -133,6 +133,13 @@ logged in.
     app's own processes, with a total. It refreshes every 2 seconds while
     open; a busy account (e.g. scrolling a chat full of media) shows a
     higher CPU share. "Copy" puts the table on the clipboard.
+17. **Resource test:** Help → Run Resource Test… explains the test; Restart
+    and Measure restarts Altus + with the window open and "Resource test in
+    progress" in the title, accounts working as usual. Help → End Resource
+    Test opens Explorer on `%APPDATA%\Altus Electron 44 Test\resource-tests`
+    with the summary selected next to the CSV, and Altus + restarts
+    normally. Quitting during the test also writes the summary; the next
+    start is normal. Only the last 10 tests are kept.
 
 ### Automated smoke test
 
@@ -170,18 +177,25 @@ fails it uploads no installer.
    as playing either), only the playing check is skipped, with a note. Run
    locally, the check plays a near-silent tone and shows a silent
    notification for a moment.
-6. `Setup.exe /S --replace-altus` with fake original Altus data (Italian,
+6. Help → Run Resource Test… → Restart and Measure restarts the app into
+   the test with three tabs. The CSV in `resource-tests` gets a header,
+   the "test started" line, "window shown", a "WhatsApp page loaded" line
+   and samples for each account. Help → End Resource Test writes the
+   summary (listing the three accounts), closes the CSV with "test ended",
+   opens Explorer there and restarts the app normally. The restarted
+   instances are stopped by PID.
+7. `Setup.exe /S --replace-altus` with fake original Altus data (Italian,
    tabs "Personale" and "Lavoro", autostart on):
    - the profile is copied and the backup folder is created;
    - the installed app opens those tabs, in Italian, on the original
      partitions;
    - the app's autostart entry runs the installed exe with `--hidden`.
-7. A reinstall changes neither the Altus + profile nor the original data.
-8. Uninstalling removes the program and keeps the profile.
+8. A reinstall changes neither the Altus + profile nor the original data.
+9. Uninstalling removes the program and keeps the profile.
 
 Failures attach logs and screenshots (`smoke-artifacts`) to the run. Checks
-6-8 install and uninstall for real, so they only run on GitHub's throwaway
-runners. Locally, `yarn package -p win32` then `yarn smoke` runs checks 1-5
+7-9 install and uninstall for real, so they only run on GitHub's throwaway
+runners. Locally, `yarn package -p win32` then `yarn smoke` runs checks 1-6
 on a temporary profile.
 
 ### Packaged smoke run without touching your profile

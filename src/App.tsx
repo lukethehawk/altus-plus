@@ -16,11 +16,13 @@ import { I18NProvider } from "./i18n/solid";
 import ThemeManagerDialog from "./components/ThemeManagerDialog";
 import DownloadToast from "./components/DownloadToast";
 import ResourceUsageDialog from "./components/ResourceUsageDialog";
+import ResourceTestDialog from "./components/ResourceTestDialog";
 
 const App: Component = () => {
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [isThemeManagerOpen, setIsThemeManagerOpen] = createSignal(false);
   const [isResourceUsageOpen, setIsResourceUsageOpen] = createSignal(false);
+  const [isResourceTestOpen, setIsResourceTestOpen] = createSignal(false);
   const [menu, { refetch: refetchAppMenu }] = createResource(window.getAppMenu);
 
   const handlers = new Set<() => void>();
@@ -42,6 +44,11 @@ const App: Component = () => {
   handlers.add(
     window.electronIPCHandlers.onOpenResourceUsage(() => {
       setIsResourceUsageOpen(true);
+    })
+  );
+  handlers.add(
+    window.electronIPCHandlers.onOpenResourceTest(() => {
+      setIsResourceTestOpen(true);
     })
   );
   handlers.add(
@@ -86,6 +93,10 @@ const App: Component = () => {
         <ResourceUsageDialog
           isOpen={isResourceUsageOpen}
           setIsOpen={setIsResourceUsageOpen}
+        />
+        <ResourceTestDialog
+          isOpen={isResourceTestOpen}
+          setIsOpen={setIsResourceTestOpen}
         />
         <DownloadToast />
       </div>

@@ -35,6 +35,7 @@ declare global {
     ) => Promise<Electron.MessageBoxReturnValue>;
     getAppMenu: () => Promise<CloneableMenu>;
     getResourceUsage: () => Promise<ResourceGroup[]>;
+    startResourceTest: () => Promise<void>;
     i18n: {
       getTranslations: () => Promise<{
         current: Record<string, string>;

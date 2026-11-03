@@ -30,7 +30,7 @@ The original project is no longer updated. Altus + keeps it running on a current
 | 📥 **Unread at a glance** | Hover over the tray icon to see each account's unread chats, and which accounts are muted. |
 | 🔊 **Background audio** | Voice messages keep playing when you switch tab; inactive tabs are never suspended or muted. |
 | 📎 **Download notice** | "Attachment saved · Show in folder" after each download. |
-| 📊 **Resource usage** | Help → Resource Usage shows each account's CPU and memory, refreshed while open. |
+| 📊 **Resource usage** | Help → Resource Usage shows each account's CPU and memory, refreshed while open. Help → Run Resource Test records them from startup into a CSV file with a summary, until you end it. |
 | 🩹 **Crash recovery** | A crashed or frozen account reloads on its own without touching the others. |
 | ⬆️ **In-app updates** | New releases download in the background, are verified (SHA512) and install with one click. A notice stays on screen while they install. |
 | 🌐 **English / Italiano** | Settings → Language, applied at once. |
