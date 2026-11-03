@@ -12,6 +12,7 @@
 // 5. tabs in the background, also with the whole app in the tray, keep
 //    playing sound (also after switching tab) and show notifications labelled
 //    with their account, and a muted account's notification is suppressed.
+//    Tabs move by dragging only once "Allow Moving Tabs" is on.
 //    It plays a near-silent tone and shows a silent notification for a moment;
 // 6. the installer replaces a fake original Altus (/S --replace-altus), the
 //    installed app opens its tabs and settings and registers autostart;
@@ -489,13 +490,102 @@ const NOTIFY = `(async () => {
 const webviewCall = (id, method) => `document.getElementById(${JSON.stringify(`webview-${id}`)}).${method}()`;
 
 /**
+ * Drags one tab onto another with the mouse, through Chromium's own drag
+ * handling (intercepted, so no OS drag loop starts). Returns whether a drag
+ * started at all.
+ */
+async function dragTab(cdp, fromId, toId) {
+  const center = (id) => cdp.evaluate(`(() => {
+    const rect = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  })()`);
+  const from = await center(fromId);
+  const to = await center(toId);
+  let data;
+  const listener = ({ method, params }) => {
+    if (method === "Input.dragIntercepted") data = params.data;
+  };
+  cdp.listeners.push(listener);
+  try {
+    await cdp.send("Input.setInterceptDrags", { enabled: true });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...from, button: "left", buttons: 1, clickCount: 1 });
+    for (let step = 1; step <= 10; step++) {
+      const x = from.x + ((to.x - from.x) * step) / 10;
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y: from.y, button: "left", buttons: 1 });
+    }
+    await sleep(300);
+    if (data) {
+      for (const type of ["dragEnter", "dragOver", "drop"]) {
+        await cdp.send("Input.dispatchDragEvent", { type, ...to, data });
+      }
+    }
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...to, button: "left", buttons: 0, clickCount: 1 });
+    return Boolean(data);
+  } finally {
+    await cdp.send("Input.setInterceptDrags", { enabled: false }).catch(() => undefined);
+    cdp.listeners.splice(cdp.listeners.indexOf(listener), 1);
+  }
+}
+
+/**
+ * Moving tabs is off by default; turned on (as the Tab menu does), a tab
+ * dropped on another moves there and the order is saved.
+ */
+async function checkMovingTabs(cdp, profile, failures) {
+  const order = () => cdp.evaluate(`[...document.querySelectorAll('[role="tab"]')].map((tab) => tab.id)`);
+  const savedOrder = () => readJson(path.join(profile, "tabs.json")).tabs.map((tab) => tab.id);
+  const names = (ids) => ids.map((id) => BACKGROUND_TABS.find((tab) => tab.id === id)?.name ?? id).join(", ");
+  const draggable = (id) => cdp.evaluate(`document.getElementById(${JSON.stringify(id)}).draggable`);
+  const menuItem = async () => {
+    const find = (items) => {
+      for (const item of items ?? []) {
+        const found = item.id === "allow-moving-tabs" ? item : find(item.submenu);
+        if (found) return found;
+      }
+      return null;
+    };
+    return find(await cdp.evaluate("window.getAppMenu()"));
+  };
+  const initial = BACKGROUND_TABS.map((tab) => tab.id);
+
+  const item = await menuItem();
+  if (!item) failures.push('no "Allow Moving Tabs" item in the Tab menu');
+  else if (item.checked) failures.push('"Allow Moving Tabs" is ticked on a new profile');
+  if (await draggable(ALFA.id)) failures.push("tabs can be dragged although moving tabs is off");
+  const dragged = await dragTab(cdp, ALFA.id, GAMMA.id);
+  if (dragged) failures.push("dragging a tab started although moving tabs is off");
+  if (!sameJson(await order(), initial)) failures.push(`moving tabs is off, yet the order became ${names(await order())}`);
+
+  // The same setting the Tab menu item saves; main ticks the item and tells the window.
+  await cdp.evaluate('window.electronSettingsStore.setSetting("tabReordering", true)');
+  try {
+    await waitFor("tabs to become draggable", 10_000, () => draggable(ALFA.id));
+  } catch (error) {
+    failures.push(`after allowing moving tabs: ${error.message}`);
+    return;
+  }
+  if (!(await menuItem())?.checked) failures.push('"Allow Moving Tabs" is not ticked after turning it on');
+  if (!(await dragTab(cdp, ALFA.id, GAMMA.id))) {
+    failures.push("dragging a tab did not start with moving tabs on");
+    return;
+  }
+  const expected = [BETA.id, GAMMA.id, ALFA.id];
+  try {
+    await waitFor("the new tab order", 5_000, async () => sameJson(await order(), expected));
+    await waitFor("the new tab order to be saved", 5_000, () => sameJson(savedOrder(), expected));
+  } catch {
+    failures.push(`after dragging Alfa onto Gamma the tabs are ${names(await order())}, saved ${names(savedOrder())}; expected Beta, Gamma, Alfa`);
+  }
+}
+
+/**
  * Background tabs keep their sound and notifications. Chromium reports a tab
  * as audible while its stream plays, even when the tab is muted, so muting is
  * checked separately. Audibility is compared with the selected tab: a runner
  * without audio output reports no tab as audible, which is noted rather than
  * failed.
  */
-function exerciseBackgroundTabs(run, audio) {
+function exerciseBackgroundTabs(run, audio, profile) {
   return async ({ cdp, port, failures, notes }) => {
     const pages = {};
     try {
@@ -556,6 +646,8 @@ function exerciseBackgroundTabs(run, audio) {
         }
         if (await cdp.evaluate(webviewCall(ALFA.id, "isAudioMuted"))) failures.push("Alfa after switching to Beta: audio muted");
         if (audio.monitored) await expectAudible(ALFA, "after switching to Beta");
+
+        await checkMovingTabs(cdp, profile, failures);
       }
     } catch (error) {
       failures.push(error.message);
@@ -588,14 +680,14 @@ async function checkBackgroundTabs() {
   const shown = await checkRunningApp("background-tabs", PACKAGED_EXE, [`--user-data-dir=${profile}`], {
     ...expected,
     windowShown: true,
-    afterLoad: exerciseBackgroundTabs("window shown", audio),
+    afterLoad: exerciseBackgroundTabs("window shown", audio, profile),
   }, 9415);
   // Started with Windows into the tray: every tab is in a hidden window.
   seed({ launchToTray: { value: true } });
   const inTray = await checkRunningApp("background-tabs-tray", PACKAGED_EXE, [`--user-data-dir=${profile}`, "--hidden"], {
     ...expected,
     windowShown: false,
-    afterLoad: exerciseBackgroundTabs("in the tray", audio),
+    afterLoad: exerciseBackgroundTabs("in the tray", audio, profile),
   }, 9416);
   removeTemp(profile);
   return {
@@ -781,7 +873,7 @@ const checks = [
   ["2. Modified app.asar is refused", checkTamperedAsar],
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand", checkStartInTray],
-  ["5. Background tabs keep sound and notifications; a muted account stays quiet", checkBackgroundTabs],
+  ["5. Background tabs keep sound and notifications; a muted account stays quiet; tabs move only when allowed", checkBackgroundTabs],
 ];
 if (runInstaller) {
   checks.push(

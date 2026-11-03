@@ -115,9 +115,15 @@ const TabComponent: Component<TabComponentProps> = (props) => {
           }
           onClick={() => setTabActive(props.tab.id)}
           data-selected={isSelected() ? "" : undefined}
-          draggable={true}
+          // A string: Solid renders draggable={true} as draggable="", which
+          // HTML does not treat as draggable.
+          draggable={getSettingValue("tabReordering") ? "true" : "false"}
           onDragStart={(event) => {
             if (!event.dataTransfer) return;
+            if (!getSettingValue("tabReordering")) {
+              event.preventDefault();
+              return;
+            }
             setDraggedTab({
               id: props.tab.id,
               index: props.index(),
@@ -381,15 +387,14 @@ const TabsList: Component = () => {
         <div
           role="tablist"
           class="tabs-list flex overflow-x-auto"
+          // Accept only a tab being dragged, not files or text.
           onDragEnter={(event) => {
             if (!event.dataTransfer) return;
-            const isDraggingTab = !!draggedTab;
-            if (isDraggingTab) event.preventDefault();
+            if (draggedTab()) event.preventDefault();
           }}
           onDragOver={(event) => {
             if (!event.dataTransfer) return;
-            const isDraggingTab = !!draggedTab;
-            if (isDraggingTab) event.preventDefault();
+            if (draggedTab()) event.preventDefault();
           }}
           onDrop={(event) => {
             const droppedOnTab = event.target.closest('[role="tab"]');

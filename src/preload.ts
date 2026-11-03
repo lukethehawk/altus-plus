@@ -107,6 +107,10 @@ const ipcHandlers: ElectronIPCHandlers = {
     ipcRenderer.on("reload-translations", callback);
     return () => ipcRenderer.off("reload-translations", callback);
   },
+  onReloadSettings: (callback) => {
+    ipcRenderer.on("reload-settings", callback);
+    return () => ipcRenderer.off("reload-settings", callback);
+  },
   onNewChat: (callback) => {
     ipcRenderer.on("new-chat", callback);
     return () => ipcRenderer.off("new-chat", callback);

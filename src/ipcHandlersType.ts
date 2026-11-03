@@ -12,6 +12,7 @@ export type ElectronIPCHandlers = {
   onOpenWhatsappLink: (callback: (url: string) => void) => () => void;
   onReloadCustomTitleBar: (callback: () => void) => () => void;
   onReloadTranslations: (callback: () => void) => () => void;
+  onReloadSettings: (callback: () => void) => () => void;
   onNewChat: (callback: () => void) => () => void;
   onOpenThemeManager: (callback: () => void) => () => void;
   onMessageCount: (

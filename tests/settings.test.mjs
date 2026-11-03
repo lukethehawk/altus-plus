@@ -49,3 +49,9 @@ test("rejects values of the wrong type or outside the allowed set", () => {
   assert.equal(SettingsSchema.shape.trayIcon.safeParse({}).success, false);
   assert.equal(SettingsSchema.shape.trayIcon.safeParse(null).success, false);
 });
+
+test("tabs cannot be moved by dragging until the user allows it", () => {
+  assert.equal(DefaultSettingValues.tabReordering, false);
+  assert.equal(accepts("tabReordering", true), true);
+  assert.equal(accepts("tabReordering", "true"), false);
+});

@@ -4,6 +4,7 @@ import z from "zod";
 export const SettingsSchema = z.object({
   tabBar: z.object({ value: z.boolean() }),
   tabBarPosition: z.object({ value: z.enum(["top", "bottom"]) }),
+  tabReordering: z.object({ value: z.boolean() }),
   trayIcon: z.object({ value: z.boolean() }),
   registerProtocol: z.object({ value: z.boolean() }),
   tabClosePrompt: z.object({ value: z.boolean() }),
@@ -35,6 +36,8 @@ export type SettingValue = {
 export const DefaultSettingValues = {
   tabBar: true,
   tabBarPosition: "top",
+  // Off so that a tab is never moved by accident: Tab menu → Allow Moving Tabs.
+  tabReordering: false,
   trayIcon: true,
   registerProtocol: false,
   tabClosePrompt: true,
@@ -60,6 +63,7 @@ export const DefaultSettingValues = {
 export const getDefaultSettings = (): Settings => ({
   tabBar: { value: DefaultSettingValues.tabBar },
   tabBarPosition: { value: DefaultSettingValues.tabBarPosition },
+  tabReordering: { value: DefaultSettingValues.tabReordering },
   trayIcon: { value: DefaultSettingValues.trayIcon },
   registerProtocol: { value: DefaultSettingValues.registerProtocol },
   tabClosePrompt: { value: DefaultSettingValues.tabClosePrompt },

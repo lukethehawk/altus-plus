@@ -24,7 +24,7 @@ The original project is no longer updated. Altus + keeps it running on a current
 
 | | |
 |---|---|
-| 👥 **Multiple accounts** | One tab per WhatsApp account, each in its own isolated session. |
+| 👥 **Multiple accounts** | One tab per WhatsApp account, each in its own isolated session. To reorder them, turn on Tab → *Allow Moving Tabs* and drag a tab onto another. |
 | 🔔 **Clear notifications** | Notification titles show the account (`Work · Mario Rossi`). A click opens the right tab and chat. |
 | 🔕 **Per-account mute** | Right-click a tab to mute it for 1 hour, 8 hours or until you turn it back on. Other accounts keep notifying. |
 | 📥 **Unread at a glance** | Hover over the tray icon to see each account's unread chats, and which accounts are muted. |

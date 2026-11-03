@@ -24,7 +24,7 @@ Il progetto originale non riceve più aggiornamenti. Altus + lo mantiene su una 
 
 | | |
 |---|---|
-| 👥 **Più account** | Una scheda per ogni account WhatsApp, ognuna con la propria sessione isolata. |
+| 👥 **Più account** | Una scheda per ogni account WhatsApp, ognuna con la propria sessione isolata. Per riordinarle, attiva Scheda → *Consenti di spostare le schede* e trascina una scheda sopra un'altra. |
 | 🔔 **Notifiche chiare** | Il titolo della notifica indica l'account (`Lavoro · Mario Rossi`). Un clic apre la scheda e la chat giuste. |
 | 🔕 **Silenzia per account** | Clic destro su una scheda per silenziarla per 1 ora, 8 ore o finché non la riattivi. Gli altri account continuano a notificare. |
 | 📥 **Non letti a colpo d'occhio** | Passa il mouse sull'icona nel tray per vedere le chat non lette di ogni account e quali account sono silenziati. |
