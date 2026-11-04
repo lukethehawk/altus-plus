@@ -13,7 +13,7 @@
 //    playing sound (also after switching tab) and show notifications labelled
 //    with their account, and a muted account's notification is suppressed.
 //    Tabs move by dragging only once "Allow Moving Tabs" is on, and
-//    Help → Resource Usage lists every account.
+//    Help → Resource Usage lists every account and recognises every process.
 //    It plays a near-silent tone and shows a silent notification for a moment;
 // 6. Help → Run Resource Test restarts the app into the test, which records
 //    the three accounts into a CSV file; Help → End Resource Test writes the
@@ -562,6 +562,18 @@ async function checkResourcePanel(cdp, failures, notes) {
   }
   for (const kind of ["main", "window"]) {
     if (!shown.some((row) => row.kind === kind && row.privateMB > 0)) failures.push(`Resource Usage has no ${kind} row`);
+  }
+  // Every renderer here is an account, the window or a WhatsApp service
+  // worker: "Other processes" means one was not recognised. The panel
+  // refreshes every 2 seconds while open, so a few refreshes are looked at.
+  for (let refresh = 0; refresh < 3; refresh++) {
+    const current = refresh === 0 ? shown : await rows().catch(() => []);
+    const other = current.find((row) => row.kind === "other");
+    if (other) {
+      failures.push(`Resource Usage shows ${other.processes} unrecognised process(es) (rows: ${JSON.stringify(current)})`);
+      break;
+    }
+    await sleep(2000);
   }
   notes.push(`Resource Usage: ${shown.map((row) => `${row.tabId ? BACKGROUND_TABS.find((tab) => tab.id === row.tabId)?.name : row.kind} ${Math.round(row.privateMB)} MB`).join(", ")}`);
   await cdp.evaluate('document.querySelector("[data-resource-usage-close]").click()');

@@ -74,7 +74,7 @@ test("totals add up the rounded rows, as the panel shows them", () => {
   assert.equal(total.cpuPercent, 3.9);
 });
 
-test("left-over renderers are WhatsApp's service workers when the counts match", () => {
+test("renderers without a page are WhatsApp's service workers", () => {
   const groups = groupProcessUsage([...withoutStray, ...workers], { ...owners, workerProcesses: 2 });
   // They belong to the accounts, so they come right after them.
   assert.deepEqual(
@@ -82,9 +82,32 @@ test("left-over renderers are WhatsApp's service workers when the counts match",
     ["workers", "window"]
   );
   assert.deepEqual(groups[3], { kind: "workers", processes: 2, cpuPercent: 0.1, privateMB: 115, workingSetMB: 125 });
-  const kinds = (workerProcesses, list) =>
-    groupProcessUsage(list, { ...owners, workerProcesses }).map((group) => group.kind);
-  // One renderer more than the service workers: it cannot be told apart.
-  assert.equal(kinds(2, [...withoutStray, ...workers, processes.at(-1)]).includes("workers"), false);
-  assert.equal(kinds(0, [...withoutStray, ...workers]).includes("workers"), false);
+});
+
+test("a worker that starts or is replaced does not turn the row into other processes", () => {
+  // Three renderers without a page while Electron lists one to four running
+  // workers: a worker's renderer is starting, or still closing.
+  for (const workerProcesses of [1, 2, 3, 4]) {
+    const groups = groupProcessUsage([...processes, ...workers], { ...owners, workerProcesses });
+    assert.equal(groups.some((group) => group.kind === "other"), false, `${workerProcesses} running`);
+    assert.equal(groups.find((group) => group.kind === "workers").processes, 3);
+  }
+});
+
+test("a renderer showing another page, such as DevTools, stays other", () => {
+  const groups = groupProcessUsage([...processes, ...workers], {
+    ...owners,
+    workerProcesses: 2,
+    pagePids: [20, 30, 31, 40],
+  });
+  assert.equal(groups.find((group) => group.kind === "workers").processes, 2);
+  assert.deepEqual(groups.find((group) => group.kind === "other"), {
+    kind: "other", processes: 1, cpuPercent: 0, privateMB: 15, workingSetMB: 20,
+  });
+});
+
+test("with no service worker running, a renderer without a page is other", () => {
+  const groups = groupProcessUsage([...withoutStray, ...workers], { ...owners, workerProcesses: 0 });
+  assert.equal(groups.some((group) => group.kind === "workers"), false);
+  assert.equal(groups.find((group) => group.kind === "other").processes, 2);
 });

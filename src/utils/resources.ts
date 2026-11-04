@@ -49,8 +49,14 @@ export type ProcessOwners = {
   /** The renderer of the app window. */
   windowPid?: number;
   /**
-   * Renderers that run only WhatsApp's service workers (one per account).
-   * Electron does not give their system PIDs, only how many there are.
+   * Every renderer that shows a page or a frame of one: the window, the
+   * accounts, DevTools, ... A renderer that shows none runs workers only.
+   */
+  pagePids?: number[];
+  /**
+   * Renderers that run only WhatsApp's service workers (one per account), as
+   * Electron lists them. Electron does not give their system PIDs, and while a
+   * worker starts or is replaced there can be one renderer more or less.
    */
   workerProcesses?: number;
 };
@@ -65,7 +71,11 @@ function kindOf(process: ProcessUsage, owners: ProcessOwners): ResourceKind {
     case "GPU":
       return "gpu";
     case "Tab":
-      return process.pid === owners.windowPid ? "window" : "other";
+      if (process.pid === owners.windowPid) return "window";
+      if (owners.pagePids?.includes(process.pid)) return "other";
+      // No page: a renderer for WhatsApp's service workers, also while one
+      // of them starts or stops and the counts briefly differ.
+      return owners.workerProcesses ? "workers" : "other";
     case "Utility":
       if (process.serviceName?.startsWith("network.")) return "network";
       if (process.serviceName?.startsWith("audio.")) return "audio";
@@ -114,12 +124,6 @@ export function groupProcessUsage(processes: ProcessUsage[], owners: ProcessOwne
     group.cpuPercent += Number.isFinite(process.cpuPercent) ? process.cpuPercent : 0;
     group.privateMB += (process.privateKB ?? 0) / 1024;
     group.workingSetMB += process.workingSetKB / 1024;
-  }
-  // The renderers left over are the service workers when the counts match.
-  const leftOver = others.get("other");
-  if (leftOver && owners.workerProcesses && leftOver.processes === owners.workerProcesses) {
-    others.delete("other");
-    others.set("workers", { ...leftOver, kind: "workers" });
   }
   return [...accounts, ...OTHER_KINDS.flatMap((kind) => others.get(kind) ?? [])].map((group) => ({
     ...group,

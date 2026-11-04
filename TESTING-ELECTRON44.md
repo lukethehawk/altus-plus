@@ -132,7 +132,10 @@ logged in.
     order with its CPU and memory, then WhatsApp's service workers and the
     app's own processes, with a total. It refreshes every 2 seconds while
     open; a busy account (e.g. scrolling a chat full of media) shows a
-    higher CPU share. "Copy" puts the table on the clipboard.
+    higher CPU share. "Copy" puts the table on the clipboard. The service
+    worker row keeps its name while WhatsApp starts or replaces a worker
+    (its process count can be one higher for a few seconds); "Other
+    processes" should not appear in normal use.
 17. **Resource test:** Help → Run Resource Test… explains the test; Restart
     and Measure restarts Altus + with the window open and "Resource test in
     progress" in the title, accounts working as usual. Help → End Resource
