@@ -189,9 +189,17 @@ function sampleResourceUsage(mainWindow: BrowserWindow) {
   const pidByTab = new Map<string, number>();
   // Chromium's own process IDs, which service workers are reported with.
   const pageProcessIds = new Set<number>();
+  // System PIDs of every renderer showing a page or a frame of one.
+  const pagePids = new Set<number>();
   for (const contents of webContents.getAllWebContents()) {
     if (contents.isDestroyed()) continue;
     pageProcessIds.add(contents.getProcessId());
+    pagePids.add(contents.getOSProcessId());
+    try {
+      for (const frame of contents.mainFrame.framesInSubtree) pagePids.add(frame.osProcessId);
+    } catch {
+      // The page is navigating or closing; its main renderer is counted above.
+    }
     if (contents.getType() !== "webview") continue;
     const tab = tabs.find((tab) => contents.session === session.fromPartition(`persist:${tab.id}`));
     if (tab) pidByTab.set(tab.id, contents.getOSProcessId());
@@ -216,6 +224,7 @@ function sampleResourceUsage(mainWindow: BrowserWindow) {
     {
       accounts: tabs.map((tab) => ({ tabId: tab.id, name: tab.name, pid: pidByTab.get(tab.id) })),
       windowPid: mainWindow.isDestroyed() ? undefined : mainWindow.webContents.getOSProcessId(),
+      pagePids: [...pagePids],
       workerProcesses: workerProcessIds.size,
     }
   );

@@ -124,8 +124,10 @@ advisory, are checked weekly by a separate workflow (`docs/RELEASING.md`,
 GitHub listed 88 open Dependabot alerts. Each one was matched against the
 versions in `yarn.lock`: all 88 were real (a vulnerable version was locked).
 Only one of those packages ships in the app: `ajv` 8.12.0, bundled through
-electron-store → conf (its alert needs the `$data` option, which our schema
-does not use). The other 87 alerts are in build or development tooling.
+electron-store → conf. conf only compiles a validator when a store has a
+`schema`, and none of ours does, so ajv is loaded but never runs (its alert
+also needs the `$data` option). The other 87 alerts are in build or
+development tooling.
 
 ### What changed
 
@@ -172,24 +174,33 @@ Vite configuration, unminified, and compared module by module:
 
 | | Before | After |
 |---|---:|---:|
-| Open Dependabot alerts whose vulnerable range still matches `yarn.lock` | 88 | 27 |
+| Open Dependabot alerts (after GitHub's rescan of the merge) | 88 | 27 |
 | `yarn npm audit --all --recursive`, ignore list off (critical / high / moderate / low) | 1 / 63 / 41 / 13 | 1 / 14 / 15 / 5 |
 | Same, production environment, high or critical | 0 (13 IDs ignored) | 0 (ignore list empty) |
+
+After the merge GitHub closed 61 of the 88 alerts; 26 stay open, it
+auto-dismissed one (`glob`, development only) and opened one new alert for
+`vite` 4.5.14 (server.fs.deny bypass on Windows, only with the dev server
+exposed with `--host`, which this project never does; 4.5.2 was outside that
+advisory's range).
 
 What is left needs major upgrades. None of it ships in the app:
 
 | Package | Alerts | Reachability | Way out |
 |---|---:|---|---|
 | `tar` 6.2.1 (includes the npm critical) | 8 | app-builder-lib 26.0.12 and Forge's native-module rebuild (`@electron/rebuild` 3, node-gyp 9, cacache). The app has no native modules; electron-builder only unpacks its own downloads | A newer app-builder-lib (26.18 uses tar 7; from 26.12 our patch is no longer needed) **and** a newer Forge |
-| `vite` 4.5.14, `esbuild` 0.18.20 | 12 | Dev server only (`yarn start` on the developer's machine); CI and releases run `vite build` | Forge's Vite plugin with Vite 5 or later |
+| `vite` 4.5.14 (12), `esbuild` 0.18.20 (1) | 13 | Dev server only (`yarn start` on the developer's machine); CI and releases run `vite build` | Forge's Vite plugin with Vite 5 or later |
 | `extract-zip` 2.0.1 | 2 | `@electron/packager` unpacks the Electron zip, downloaded from GitHub and checked against its SHASUMS | No fixed version exists |
 | `app-builder-lib` 26.0.12 (AppImage search path), `builder-util-runtime` 9.3.1 (token leak on redirects) | 2 | AppImage is Linux only; the token issue is in electron-builder's publisher, which we do not use. The shipped updater already uses builder-util-runtime 9.7.0 | app-builder-lib ≥ 26.15 |
-| `minimatch` (< 11.0.1), `glob` (≤ 14.0.1) | 2 | Build tooling; fixed only in new majors | Upgrading their parents |
+| `minimatch` (< 11.0.1) | 1 | Build tooling; fixed only in a new major | Upgrading its parents |
 | `@babel/core` 7.26.10 (low) | 1 | Follows source-map comments in our own sources while compiling the UI. Left out on purpose: it is the UI compiler | Next Babel update |
 
-npm also reports some build-only advisories without a Dependabot alert:
-`image-size` 0.7.5 (appdmg, macOS DMG only), `micromatch` 4.0.5 and `yaml`
-2.3.2 (Tailwind / PostCSS), `diff` 4.0.2 (ts-node).
+npm also reports some build-only advisories without an open Dependabot alert
+(GitHub auto-dismissed them as development only): `image-size` 0.7.5
+(appdmg, macOS DMG only), `micromatch` 4.0.5 and `yaml` 2.3.2 (Tailwind /
+PostCSS), `glob` 10.5.0 (only matters to code that cancels a search with an
+AbortSignal),
+`diff` 4.0.2 (ts-node).
 
 ## Not claimed
 
