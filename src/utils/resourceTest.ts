@@ -17,6 +17,58 @@ const MAX_DURATION_MS = 24 * 60 * 60 * SECOND;
 const CALM_CPU_PERCENT = 2;
 const CALM_SECONDS = 15;
 const MIN_GROWTH_SECONDS = 30 * 60;
+/** JavaScript memory rises and falls with garbage collection: the lowest value over this long is compared. */
+const JS_WINDOW_SECONDS = 10 * 60;
+
+/** Moments of the startup, in ms since the epoch. */
+export type StartupTimes = {
+  /** When Windows created the main process, as Electron reports it. */
+  processCreatedAt?: number;
+  /** When Node.js started inside it (now minus process.uptime()). */
+  nodeStartedAt: number;
+  /** When Altus +'s own code started (src/startTime.ts). */
+  mainScriptStartedAt: number;
+  /** Electron's "ready" event. */
+  electronReadyAt?: number;
+};
+
+/**
+ * Where the test's seconds count from: when Windows created the process, if
+ * Electron gives a plausible time (not after Node.js started, nor more than a
+ * minute before), else when Node.js started.
+ */
+export function testStartTime(times: StartupTimes): number {
+  const created = times.processCreatedAt;
+  const plausible =
+    created !== undefined &&
+    Number.isFinite(created) &&
+    created <= times.nodeStartedAt + 1000 &&
+    times.nodeStartedAt - created < 60 * SECOND;
+  return plausible ? Math.min(created, times.nodeStartedAt) : times.nodeStartedAt;
+}
+
+/**
+ * The startup moments as events, in seconds from the test's start; Node.js's
+ * start only when the test counts from the process's creation.
+ */
+export function startupEvents(times: StartupTimes, startedAt: number): StartupEvent[] {
+  const at = (time: number) => Math.max(0, (time - startedAt) / SECOND);
+  return [
+    ...(startedAt < times.nodeStartedAt ? [{ mark: "node" as const, seconds: at(times.nodeStartedAt) }] : []),
+    { mark: "script" as const, seconds: at(times.mainScriptStartedAt) },
+    ...(times.electronReadyAt === undefined ? [] : [{ mark: "ready" as const, seconds: at(times.electronReadyAt) }]),
+  ].map((event) => ({ type: "startup" as const, ...event }));
+}
+
+export const STARTUP_EVENT_TEXT: Record<StartupEvent["mark"], string> = {
+  node: "Node.js started",
+  script: "main script started",
+  ready: "Electron ready",
+  window: "window created",
+};
+
+/** The main process's JavaScript memory (process.memoryUsage()), in MB. */
+export type MainMemory = { jsHeapUsedMB: number; jsHeapTotalMB: number; jsExternalMB: number };
 
 /**
  * Every second during startup, then every 10 seconds; nothing after 24 hours,
@@ -73,18 +125,30 @@ export function csvField(value: string | number | undefined): string {
   return /[",;]/.test(text) || text !== text.trim() ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-export const CSV_HEADER = "seconds,time,kind,name,processes,cpu_percent,private_mb,working_set_mb";
+/** The last three columns are filled on the main process's rows only. */
+export const CSV_HEADER =
+  "seconds,time,kind,name,processes,cpu_percent,private_mb,working_set_mb,js_heap_used_mb,js_heap_total_mb,js_external_mb";
 
 const csvLine = (fields: (string | number | undefined)[]) => fields.map(csvField).join(",");
 const roundSeconds = (seconds: number) => Math.round(seconds * 10) / 10;
+const roundOne = (value: number) => Math.round(value * 10) / 10;
 
-/** One row per group and one for the total; accounts are named after their tab. */
-export function sampleCsvLines(seconds: number, time: Date, groups: ResourceGroup[]): string[] {
+/**
+ * One row per group and one for the total; accounts are named after their
+ * tab. The main process's row also has its JavaScript memory, if known.
+ */
+export function sampleCsvLines(seconds: number, time: Date, groups: ResourceGroup[], mainMemory?: MainMemory): string[] {
   const at = [roundSeconds(seconds), localTime(time)];
   const total = totalUsage(groups);
+  const js = mainMemory
+    ? [mainMemory.jsHeapUsedMB, mainMemory.jsHeapTotalMB, mainMemory.jsExternalMB].map(roundOne)
+    : [];
   return [
     ...groups.map((group) =>
-      csvLine([...at, group.kind, group.name ?? "", group.processes, group.cpuPercent, group.privateMB, group.workingSetMB])
+      csvLine([
+        ...at, group.kind, group.name ?? "", group.processes, group.cpuPercent, group.privateMB, group.workingSetMB,
+        ...(group.kind === "main" ? js : []),
+      ])
     ),
     csvLine([...at, "total", "", total.processes, total.cpuPercent, total.privateMB, total.workingSetMB]),
   ];
@@ -100,14 +164,18 @@ export type TestSample = {
   cpuPercent: number;
   privateMB: number;
   accounts: { tabId: string; name: string; privateMB: number; running: boolean }[];
+  mainPrivateMB?: number;
+  jsHeapUsedMB?: number;
 };
 
-export function toTestSample(seconds: number, groups: ResourceGroup[]): TestSample {
+export function toTestSample(seconds: number, groups: ResourceGroup[], mainMemory?: MainMemory): TestSample {
   const total = totalUsage(groups);
   return {
     seconds,
     cpuPercent: total.cpuPercent,
     privateMB: total.privateMB,
+    mainPrivateMB: groups.find((group) => group.kind === "main")?.privateMB,
+    jsHeapUsedMB: mainMemory && roundOne(mainMemory.jsHeapUsedMB),
     accounts: groups
       .filter((group) => group.kind === "account" && group.tabId)
       .map((group) => ({
@@ -119,12 +187,24 @@ export function toTestSample(seconds: number, groups: ResourceGroup[]): TestSamp
   };
 }
 
+export type StartupEvent = { type: "startup"; mark: "node" | "script" | "ready" | "window"; seconds: number };
+
 export type TestEvent =
+  | StartupEvent
   | { type: "window-shown"; seconds: number }
   | { type: "account-loaded"; seconds: number; tabId: string; name: string };
 
+type Growth = {
+  startMB: number;
+  endMB: number;
+  /** Only when the test ran long enough after startup. */
+  growthMBPerHour?: number;
+};
+
 export type TestSummary = {
   durationSeconds: number;
+  /** Seconds of each startup moment; "node" only when counting from the process's creation. */
+  startup: Partial<Record<StartupEvent["mark"], number>>;
   windowShownSeconds?: number;
   accountsLoaded: { name: string; seconds: number }[];
   peakCpu?: { value: number; seconds: number };
@@ -139,8 +219,46 @@ export type TestSummary = {
     /** Only when the test ran long enough after startup. */
     growthMBPerHour?: number;
   }[];
+  /** The main process; its JavaScript memory only for tests long enough to tell. */
+  main?: Growth & { maxMB: number; js?: Growth };
   end?: { cpuPercent: number; privateMB: number };
 };
+
+const growthPerHour = (startMB: number, endMB: number, seconds: number) =>
+  Math.round(((endMB - startMB) / (seconds / 3600)) * 10) / 10;
+
+/**
+ * The main process's memory after startup and at the end. JavaScript memory
+ * is compared by its lowest value over the first and the last 10 minutes,
+ * so that garbage not collected yet does not look like growth.
+ */
+function summarizeMain(samples: TestSample[], settled: number): TestSummary["main"] {
+  const known = samples.filter((sample) => sample.mainPrivateMB !== undefined);
+  if (!known.length) return undefined;
+  const start = known.find((sample) => sample.seconds >= settled) ?? known[0];
+  const end = known[known.length - 1];
+  const span = end.seconds - start.seconds;
+  const main: NonNullable<TestSummary["main"]> = {
+    startMB: start.mainPrivateMB as number,
+    endMB: end.mainPrivateMB as number,
+    maxMB: Math.max(...known.map((sample) => sample.mainPrivateMB as number)),
+    growthMBPerHour:
+      span >= MIN_GROWTH_SECONDS ? growthPerHour(start.mainPrivateMB as number, end.mainPrivateMB as number, span) : undefined,
+  };
+  if (span < MIN_GROWTH_SECONDS) return main;
+  const lowestJs = (from: number, to: number) => {
+    const values = known.flatMap((sample) =>
+      sample.seconds >= from && sample.seconds <= to && sample.jsHeapUsedMB !== undefined ? [sample.jsHeapUsedMB] : []
+    );
+    return values.length ? Math.min(...values) : undefined;
+  };
+  const jsStart = lowestJs(start.seconds, start.seconds + JS_WINDOW_SECONDS);
+  const jsEnd = lowestJs(end.seconds - JS_WINDOW_SECONDS, end.seconds);
+  if (jsStart !== undefined && jsEnd !== undefined) {
+    main.js = { startMB: jsStart, endMB: jsEnd, growthMBPerHour: growthPerHour(jsStart, jsEnd, span - JS_WINDOW_SECONDS) };
+  }
+  return main;
+}
 
 export function summarizeResourceTest(
   samples: TestSample[],
@@ -196,14 +314,18 @@ export function summarizeResourceTest(
   });
 
   const last = samples[samples.length - 1];
+  const startupTimes: TestSummary["startup"] = {};
+  for (const event of events) if (event.type === "startup") startupTimes[event.mark] = event.seconds;
   return {
     durationSeconds,
+    startup: startupTimes,
     windowShownSeconds: events.find((event) => event.type === "window-shown")?.seconds,
     accountsLoaded,
     peakCpu: peak("cpuPercent"),
     peakMemory: peak("privateMB"),
     calmSeconds,
     accounts,
+    main: summarizeMain(samples, settled),
     end: last && { cpuPercent: last.cpuPercent, privateMB: last.privateMB },
   };
 }
@@ -239,6 +361,17 @@ export function formatSummary(
     "",
     line("resourceTestSummaryStartup"),
   ];
+  const { node, script, ready, window } = summary.startup;
+  if (script !== undefined) {
+    const times = {
+      script: seconds(script),
+      ready: ready === undefined ? "—" : seconds(ready),
+      window: window === undefined ? "—" : seconds(window),
+    };
+    lines.push(`- ${node === undefined
+      ? line("resourceTestSummaryStartupTimesFromNode", times)
+      : line("resourceTestSummaryStartupTimes", { ...times, node: seconds(node) })}`);
+  }
   if (summary.windowShownSeconds !== undefined) {
     lines.push(`- ${line("resourceTestSummaryWindowShown", { seconds: seconds(summary.windowShownSeconds) })}`);
   }
@@ -257,6 +390,10 @@ export function formatSummary(
   lines.push(`- ${summary.calmSeconds === undefined
     ? line("resourceTestSummaryNotCalm")
     : line("resourceTestSummaryCalm", { seconds: seconds(summary.calmSeconds) })}`);
+  const growth = (value: number | undefined) =>
+    value === undefined
+      ? ""
+      : `, ${line("resourceTestSummaryGrowth", { growth: `${value > 0 ? "+" : ""}${number(value, 1)}` })}`;
   lines.push("", line("resourceTestSummaryMemory"));
   for (const account of summary.accounts) {
     const text = line("resourceTestSummaryAccount", {
@@ -265,12 +402,27 @@ export function formatSummary(
       end: number(account.endMB),
       max: number(account.maxMB),
     });
-    const growth = account.growthMBPerHour === undefined
-      ? ""
-      : `, ${line("resourceTestSummaryGrowth", { growth: `${account.growthMBPerHour > 0 ? "+" : ""}${number(account.growthMBPerHour, 1)}` })}`;
-    lines.push(`- ${text}${growth}`);
+    lines.push(`- ${text}${growth(account.growthMBPerHour)}`);
   }
-  if (summary.accounts.some((account) => account.growthMBPerHour === undefined)) {
+  if (summary.main) {
+    const { main } = summary;
+    lines.push("", line("resourceTestSummaryMainTitle"));
+    lines.push(`- ${line("resourceTestSummaryMain", {
+      start: number(main.startMB),
+      end: number(main.endMB),
+      max: number(main.maxMB),
+    })}${growth(main.growthMBPerHour)}`);
+    if (main.js) {
+      lines.push(`- ${line("resourceTestSummaryMainJs", {
+        start: number(main.js.startMB, 1),
+        end: number(main.js.endMB, 1),
+      })}${growth(main.js.growthMBPerHour)}`);
+    }
+  }
+  if (
+    summary.accounts.some((account) => account.growthMBPerHour === undefined) ||
+    (summary.main && summary.main.growthMBPerHour === undefined)
+  ) {
     lines.push(line("resourceTestSummaryTooShort"));
   }
   if (summary.end) {

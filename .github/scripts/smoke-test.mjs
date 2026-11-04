@@ -844,10 +844,26 @@ async function checkResourceTest() {
       failures.push(error.message);
     }
     if (csv) {
-      if (!csv.text.startsWith("seconds,time,kind,name,processes,cpu_percent,private_mb,working_set_mb")) failures.push("the test file has no header");
+      if (!csv.text.startsWith("seconds,time,kind,name,processes,cpu_percent,private_mb,working_set_mb,js_heap_used_mb,js_heap_total_mb,js_external_mb")) {
+        failures.push("the test file has no header");
+      }
       // Quoted: the description has commas.
       if (!/,event,"test started: Altus \+ /.test(csv.text)) failures.push("the test file does not say what was tested");
+      // Startup moments, in order (Node.js's start only when counting from the process's creation).
+      const at = (event) => csv.text.match(new RegExp(`^([\\d.]+),[^,]+,event,${event}\\r?$`, "m"))?.[1];
+      const startup = ["Node.js started", "main script started", "Electron ready", "window created"].map((event) => [event, at(event)]);
+      const found = startup.filter(([, seconds]) => seconds !== undefined);
+      for (const [event, seconds] of startup.slice(1)) if (seconds === undefined) failures.push(`the test file has no "${event}"`);
+      if (found.some(([, seconds], index) => index > 0 && Number(seconds) < Number(found[index - 1][1]))) {
+        failures.push(`startup moments out of order: ${JSON.stringify(found)}`);
+      }
+      // The main process's rows carry its JavaScript memory.
+      const mainRows = csv.text.split(/\r?\n/).filter((line) => /^[\d.]+,[^,]+,main,/.test(line)).map((line) => line.split(","));
+      if (!mainRows.length || !mainRows.every((fields) => fields.length === 11 && Number(fields[8]) > 0 && Number(fields[9]) >= Number(fields[8]))) {
+        failures.push(`the main process rows lack its JavaScript memory: ${mainRows.slice(0, 2).map((fields) => fields.join(",")).join(" | ")}`);
+      }
       notes.push(`${csv.file}: ${csv.text.split(/\r?\n/).filter(Boolean).length} rows after the pages loaded`);
+      notes.push(`startup: ${found.map(([event, seconds]) => `${event} ${seconds} s`).join(", ")}; main JavaScript ${mainRows.at(-1)?.[8]} MB`);
     }
 
     // Help → End Resource Test: summary, then a normal restart.
@@ -866,6 +882,8 @@ async function checkResourceTest() {
     if (summary) {
       for (const name of names) if (!summary.includes(`${name}:`)) failures.push(`the summary does not list ${name}`);
       if (!summary.includes("resource test")) failures.push(`the summary has no title: ${summary.slice(0, 80)}`);
+      if (!/Times since (Windows created the process|Node\.js started):/.test(summary)) failures.push("the summary has no startup times");
+      if (!summary.includes("Main process (private memory)")) failures.push("the summary has no main process section");
     }
     const samples = fs.readdirSync(folder).filter((name) => name.endsWith(".csv"));
     if (samples.length !== 1 || !fs.readFileSync(path.join(folder, samples[0]), "utf8").includes(",event,test ended")) {

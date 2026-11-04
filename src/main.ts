@@ -1,3 +1,5 @@
+// First, so that it records when the app's own code started.
+import { mainScriptStartedAt } from "./startTime";
 import {
   app,
   BrowserWindow,
@@ -131,7 +133,9 @@ function updateTrayTooltip(tabs?: Tab[]) {
 // until Help → End Resource Test or quitting, never past this process.
 const resourceTestMode = process.argv.includes(RESOURCE_TEST_FLAG);
 let resourceTest: ResourceTestRecorder | undefined;
-const processStartedAt = Date.now() - process.uptime() * 1000;
+const nodeStartedAt = Date.now() - process.uptime() * 1000;
+let electronReadyAt: number | undefined;
+const MB = 1024 * 1024;
 
 /** Restarts Altus + with the same arguments, in or out of the resource test. */
 function relaunch(inResourceTest: boolean) {
@@ -143,17 +147,26 @@ function relaunch(inResourceTest: boolean) {
 function startResourceTest(mainWindow: BrowserWindow) {
   const cpus = String(os.cpus().length);
   const ram = String(Math.round(os.totalmem() / 1024 ** 3));
-  const recorder = new ResourceTestRecorder({
+  const recorder: ResourceTestRecorder = new ResourceTestRecorder({
     directory: path.join(app.getPath("userData"), RESOURCE_TEST_FOLDER),
-    startedAt: processStartedAt,
+    startup: {
+      processCreatedAt: app.getAppMetrics().find((metric) => metric.pid === process.pid)?.creationTime,
+      nodeStartedAt,
+      mainScriptStartedAt,
+      electronReadyAt,
+    },
     sample: () => sampleResourceUsage(mainWindow),
+    mainMemory: () => {
+      const memory = process.memoryUsage();
+      return { jsHeapUsedMB: memory.heapUsed / MB, jsHeapTotalMB: memory.heapTotal / MB, jsExternalMB: memory.external / MB };
+    },
     description: `test started: ${APP_NAME} ${app.getVersion()}, Electron ${process.versions.electron}, ${cpus} logical CPUs, ${ram} GB RAM, ${os.type()} ${os.release()}`,
     summarize: (summary, info) =>
       formatSummary(
         summary,
         {
           title: `${APP_NAME} ${app.getVersion()}`,
-          started: localTime(new Date(processStartedAt)),
+          started: localTime(new Date(recorder.startedAt)),
           computer: fill(electronI18N.t("resourceTestSummaryComputer"), { cpus, ram }),
           ...info,
         },
@@ -422,6 +435,7 @@ if (!singleInstanceLock) {
   });
 
   app.on("ready", () => {
+    electronReadyAt = Date.now();
     if (process.platform === "win32") app.setAppUserModelId(APP_ID);
     const userAgentFallback = app.userAgentFallback;
     app.userAgentFallback = userAgentFallback.replace(

@@ -142,7 +142,13 @@ logged in.
     Test opens Explorer on `%APPDATA%\Altus Electron 44 Test\resource-tests`
     with the summary selected next to the CSV, and Altus + restarts
     normally. Quitting during the test also writes the summary; the next
-    start is normal. Only the last 10 tests are kept.
+    start is normal. Only the last 10 tests are kept. The summary starts
+    with the startup times (Node.js, Altus + code, Electron ready, window
+    created, counted from when Windows created the process) and has a
+    "Main process" section; after 30 minutes or more it also shows the
+    main process's JavaScript memory and its growth per hour. In the CSV
+    the "main" rows have three more columns: JavaScript heap used and
+    reserved, and external memory.
 
 ### Automated smoke test
 
@@ -182,9 +188,12 @@ fails it uploads no installer.
    notification for a moment.
 6. Help → Run Resource Test… → Restart and Measure restarts the app into
    the test with three tabs. The CSV in `resource-tests` gets a header,
-   the "test started" line, "window shown", a "WhatsApp page loaded" line
-   and samples for each account. Help → End Resource Test writes the
-   summary (listing the three accounts), closes the CSV with "test ended",
+   the "test started" line, the startup moments in order ("main script
+   started", "Electron ready", "window created"), "window shown", a
+   "WhatsApp page loaded" line, samples for each account and the main
+   process's JavaScript memory on its rows. Help → End Resource Test writes
+   the summary (listing the three accounts, the startup times and the main
+   process), closes the CSV with "test ended",
    opens Explorer there and restarts the app normally. The restarted
    instances are stopped by PID.
 7. `Setup.exe /S --replace-altus` with fake original Altus data (Italian,
