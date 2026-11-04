@@ -3,15 +3,21 @@ import path from "path";
 import { type ResourceGroup } from "./utils/resources";
 import {
   CSV_HEADER,
+  type MainMemory,
+  STARTUP_EVENT_TEXT,
+  type StartupEvent,
+  type StartupTimes,
   type TestEvent,
   type TestSample,
   type TestSummary,
   eventCsvLine,
   nextSampleDelay,
   sampleCsvLines,
+  startupEvents,
   summarizeResourceTest,
   testBaseName,
   testFilesToRemove,
+  testStartTime,
   toTestSample,
 } from "./utils/resourceTest";
 
@@ -26,6 +32,8 @@ export type ResourceTestFiles = { samples: string; summary: string };
  */
 export class ResourceTestRecorder {
   readonly files: ResourceTestFiles;
+  /** What the test's seconds count from (ms since the epoch). */
+  readonly startedAt: number;
   private readonly samples: TestSample[] = [];
   private readonly events: TestEvent[] = [];
   private readonly loadedTabs = new Set<string>();
@@ -38,15 +46,18 @@ export class ResourceTestRecorder {
   constructor(
     private readonly options: {
       directory: string;
-      /** When the process started (ms since the epoch). */
-      startedAt: number;
+      /** The test counts from the process's creation, or from Node.js's start. */
+      startup: StartupTimes;
       sample: () => ResourceGroup[];
+      /** The main process's JavaScript memory, recorded with each sample. */
+      mainMemory?: () => MainMemory;
       /** First event: app version, computer. */
       description: string;
       summarize: (summary: TestSummary, info: { capped: boolean; samplesFile: string }) => string;
     }
   ) {
-    const base = path.join(options.directory, testBaseName(new Date(options.startedAt)));
+    this.startedAt = testStartTime(options.startup);
+    const base = path.join(options.directory, testBaseName(new Date(this.startedAt)));
     this.files = { samples: `${base}.csv`, summary: `${base}.txt` };
   }
 
@@ -62,7 +73,9 @@ export class ResourceTestRecorder {
     }
     fs.writeFileSync(this.files.samples, `${CSV_HEADER}\r\n`);
     this.note(this.options.description, 0);
-    this.note("app ready");
+    for (const event of startupEvents(this.options.startup, this.startedAt)) this.recordStartup(event);
+    // The recorder starts right after the window is created.
+    this.recordStartup({ type: "startup", mark: "window", seconds: this.seconds() });
     this.takeSample();
     this.flushTimer = setInterval(() => this.flush(), FLUSH_MS);
   }
@@ -102,7 +115,16 @@ export class ResourceTestRecorder {
   }
 
   private seconds() {
-    return (Date.now() - this.options.startedAt) / 1000;
+    return (Date.now() - this.startedAt) / 1000;
+  }
+
+  private readMainMemory(): MainMemory | undefined {
+    try {
+      return this.options.mainMemory?.();
+    } catch (error) {
+      console.warn("Could not read the main process's JavaScript memory", error);
+      return undefined;
+    }
   }
 
   private takeSample = () => {
@@ -110,12 +132,13 @@ export class ResourceTestRecorder {
     try {
       const seconds = this.seconds();
       const groups = this.options.sample();
-      this.samples.push(toTestSample(seconds, groups));
-      this.pending.push(...sampleCsvLines(seconds, new Date(), groups));
+      const mainMemory = this.readMainMemory();
+      this.samples.push(toTestSample(seconds, groups, mainMemory));
+      this.pending.push(...sampleCsvLines(seconds, new Date(), groups, mainMemory));
     } catch (error) {
       console.warn("Could not sample resource usage", error);
     }
-    const delay = nextSampleDelay(Date.now() - this.options.startedAt);
+    const delay = nextSampleDelay(Date.now() - this.startedAt);
     if (delay === null) {
       this.capped = true;
       this.note("sampling stopped after 24 hours");
@@ -130,8 +153,12 @@ export class ResourceTestRecorder {
     this.note(description, event.seconds);
   }
 
+  private recordStartup(event: StartupEvent) {
+    this.record(event, STARTUP_EVENT_TEXT[event.mark]);
+  }
+
   private note(description: string, seconds = this.seconds()) {
-    this.pending.push(eventCsvLine(seconds, new Date(this.options.startedAt + seconds * 1000), description));
+    this.pending.push(eventCsvLine(seconds, new Date(this.startedAt + seconds * 1000), description));
   }
 
   // Small synchronous appends keep the rows in order.
