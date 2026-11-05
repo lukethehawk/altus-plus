@@ -75,7 +75,10 @@ logged in.
    **Start in tray with Windows** also on, signing in to Windows shows only
    the tray icon. A message still notifies, and the tray icon or the
    notification opens the window with the accounts already connected.
-   Opening Altus + from the Start menu always shows the window.
+   Opening Altus + from the Start menu always shows the window. Task
+   Manager → Startup apps keeps listing Altus + as before (a "Disabled"
+   set there stays). Altus + only rewrites the entry when it is missing or
+   the setting changed.
 7. **Download notice:** download an attachment; "Attachment saved / Show in
    folder" appears for a few seconds and the button opens Explorer with the
    file selected. With "Show save dialog" on (the default) it appears after
@@ -143,8 +146,11 @@ logged in.
     with the summary selected next to the CSV, and Altus + restarts
     normally. Quitting during the test also writes the summary; the next
     start is normal. Only the last 10 tests are kept. The summary starts
-    with the startup times (Node.js, Altus + code, Electron ready, window
-    created, counted from when Windows created the process) and has a
+    with the startup times (Node.js, Altus + code, Electron ready,
+    partitions checked, autostart checked, window created, counted from
+    when Windows created the process) and the longest step between two of
+    them, with the main process's CPU time in it (near zero: it was
+    waiting, e.g. for Windows or an antivirus), and has a
     "Main process" section; after 30 minutes or more it also shows the
     main process's JavaScript memory and its growth per hour. In the CSV
     the "main" rows have three more columns: JavaScript heap used and
@@ -189,11 +195,13 @@ fails it uploads no installer.
 6. Help → Run Resource Test… → Restart and Measure restarts the app into
    the test with three tabs. The CSV in `resource-tests` gets a header,
    the "test started" line, the startup moments in order ("main script
-   started", "Electron ready", "window created"), "window shown", a
+   started", "Electron ready", "partitions checked", "autostart checked",
+   "window created", from "Electron ready" on with the main process's CPU
+   time), "window shown", a
    "WhatsApp page loaded" line, samples for each account and the main
    process's JavaScript memory on its rows. Help → End Resource Test writes
    the summary (listing the three accounts, the startup times and the main
-   process), closes the CSV with "test ended",
+   process, and the longest startup step), closes the CSV with "test ended",
    opens Explorer there and restarts the app normally. The restarted
    instances are stopped by PID.
 7. `Setup.exe /S --replace-altus` with fake original Altus data (Italian,
@@ -201,7 +209,11 @@ fails it uploads no installer.
    - the profile is copied and the backup folder is created;
    - the installed app opens those tabs, in Italian, on the original
      partitions;
-   - the app's autostart entry runs the installed exe with `--hidden`.
+   - the app's autostart entry runs the installed exe with `--hidden`;
+   - started again, the app leaves the entry alone without running
+     `reg.exe` ("Autostart entry unchanged (set)" in its log, `autostart.json`
+     in the profile records what it wrote); after the entry is deleted, the
+     next start writes it again.
 8. A reinstall changes neither the Altus + profile nor the original data.
 9. Uninstalling removes the program and keeps the profile.
 

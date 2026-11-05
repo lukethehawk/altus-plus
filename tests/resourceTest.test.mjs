@@ -30,6 +30,7 @@ const {
   nextSampleDelay,
   relaunchArgs,
   sampleCsvLines,
+  startupEventText,
   startupEvents,
   summarizeResourceTest,
   testBaseName,
@@ -137,11 +138,45 @@ test("startup moments become events in seconds from the test's start", () => {
   ]);
 });
 
+test("the steps before the window come in order, with the main process's CPU since the previous one", () => {
+  const times = {
+    processCreatedAt: 10_000,
+    nodeStartedAt: 10_400,
+    mainScriptStartedAt: 11_200,
+    electronReadyAt: 12_000,
+    partitionsCheckedAt: 12_100,
+    autostartCheckedAt: 17_800,
+    windowCreatedAt: 18_000,
+    cpuMs: { script: 150, ready: 400, partitions: 420, autostart: 440, window: 600 },
+  };
+  assert.deepEqual(startupEvents(times, 10_000), [
+    // No CPU time when Node.js started, so none for the step after it either.
+    { type: "startup", mark: "node", seconds: 0.4 },
+    { type: "startup", mark: "script", seconds: 1.2 },
+    { type: "startup", mark: "ready", seconds: 2, cpuSeconds: 0.25 },
+    { type: "startup", mark: "partitions", seconds: 2.1, cpuSeconds: 0.02 },
+    { type: "startup", mark: "autostart", seconds: 7.8, cpuSeconds: 0.02 },
+    { type: "startup", mark: "window", seconds: 8, cpuSeconds: 0.16 },
+  ]);
+  // A moment without its CPU time leaves both steps around it without one.
+  const { partitions, ...cpuMs } = times.cpuMs;
+  assert.equal(partitions, 420);
+  const events = startupEvents({ ...times, cpuMs }, 10_000);
+  assert.deepEqual(events.map((event) => event.cpuSeconds), [undefined, undefined, 0.25, undefined, undefined, 0.16]);
+
+  assert.equal(startupEventText(events[2]), "Electron ready (main process CPU since the previous step: 0.25 s)");
+  assert.equal(startupEventText(events[4]), "autostart checked");
+  assert.equal(startupEventText({ type: "startup", mark: "window", seconds: 8, cpuSeconds: 0.004 }),
+    "window created (main process CPU since the previous step: 0.00 s)");
+});
+
 const STARTUP_EVENTS = [
   { type: "startup", mark: "node", seconds: 0.4 },
-  { type: "startup", mark: "script", seconds: 1.2 },
-  { type: "startup", mark: "ready", seconds: 2 },
-  { type: "startup", mark: "window", seconds: 2.6 },
+  { type: "startup", mark: "script", seconds: 0.5 },
+  { type: "startup", mark: "ready", seconds: 0.7, cpuSeconds: 0.2 },
+  { type: "startup", mark: "partitions", seconds: 0.8, cpuSeconds: 0.02 },
+  { type: "startup", mark: "autostart", seconds: 2.3, cpuSeconds: 0.01 },
+  { type: "startup", mark: "window", seconds: 2.4, cpuSeconds: 0.05 },
 ];
 
 /**
@@ -162,8 +197,8 @@ function run({ minutes, calmFrom = 20, growth = 0, mainGrowth = 0, jsGrowth = 0,
   }
   const events = [
     ...startup,
-    { type: "window-shown", seconds: 0.8 },
-    { type: "account-loaded", seconds: 2.5, tabId: "work", name: "Lavoro" },
+    { type: "window-shown", seconds: 2.6 },
+    { type: "account-loaded", seconds: 3, tabId: "work", name: "Lavoro" },
     { type: "account-loaded", seconds: 4, tabId: "home", name: "=Casa" },
   ];
   return summarizeResourceTest(samples, events, minutes * 60);
@@ -171,14 +206,24 @@ function run({ minutes, calmFrom = 20, growth = 0, mainGrowth = 0, jsGrowth = 0,
 
 test("summarizes startup: times, window, pages, peaks and when the CPU calms down", () => {
   const summary = run({ minutes: 10 });
-  assert.deepEqual(summary.startup, { node: 0.4, script: 1.2, ready: 2, window: 2.6 });
-  assert.equal(summary.windowShownSeconds, 0.8);
-  assert.deepEqual(summary.accountsLoaded, [{ name: "Lavoro", seconds: 2.5 }, { name: "=Casa", seconds: 4 }]);
+  assert.deepEqual(summary.startup, { node: 0.4, script: 0.5, ready: 0.7, partitions: 0.8, autostart: 2.3, window: 2.4 });
+  const { seconds, ...step } = summary.longestStartupStep;
+  assert.deepEqual(step, { from: "partitions", to: "autostart", cpuSeconds: 0.01 });
+  assert.ok(Math.abs(seconds - 1.5) < 1e-9, String(seconds));
+  assert.equal(summary.windowShownSeconds, 2.6);
+  assert.deepEqual(summary.accountsLoaded, [{ name: "Lavoro", seconds: 3 }, { name: "=Casa", seconds: 4 }]);
   // Lavoro busy at 30 % plus the main process, from the first sample.
   assert.deepEqual(summary.peakCpu, { value: 30.1, seconds: 1 });
   assert.equal(summary.peakMemory.value, 990);
   assert.equal(summary.calmSeconds, 20);
   assert.deepEqual(summary.end, { cpuPercent: 0.6, privateMB: 990 });
+});
+
+test("the longest startup step may start where the test counts from, without CPU time", () => {
+  const step = (startup) => run({ minutes: 3, startup }).longestStartupStep;
+  assert.deepEqual(step([{ type: "startup", mark: "node", seconds: 2 }, { type: "startup", mark: "script", seconds: 2.2 }]),
+    { from: "start", to: "node", seconds: 2 });
+  assert.deepEqual(step([]), undefined);
 });
 
 test("never calm, or calm only before the pages loaded, gives no calm time", () => {
@@ -231,10 +276,12 @@ test("writes the summary in the app's language, with every template filled", () 
       language
     );
     const text = format(run({ minutes: 45, growth: 12, mainGrowth: 3, jsGrowth: 1 }));
-    assert.doesNotMatch(text, /\{\w+\}|resourceTestSummary/, language);
+    assert.doesNotMatch(text, /\{\w+\}|resourceTestSummary|resourceTestStartup/, language);
     assert.match(text, /Altus \+ 5\.8\.1-plus\.15/);
-    assert.match(text, /Node\.js 0[.,]4 s, .+ 1[.,]2 s, .+ 2[.,]0 s, .+ 2[.,]6 s/);
-    assert.match(text, /Lavoro 2[.,]5 s, =Casa 4[.,]0 s/);
+    assert.match(text, /Node\.js 0[.,]4 s, .+ 0[.,]5 s, .+ 0[.,]7 s, .+ 0[.,]8 s, .+ 2[.,]3 s, .+ 2[.,]4 s/);
+    assert.ok(text.includes(`: ${strings.resourceTestStartupPartitions} → ${strings.resourceTestStartupAutostart}, ${language === "it" ? "1,5" : "1.5"} s, `), language);
+    assert.match(text, / 0[.,]01 s\r\n/);
+    assert.match(text, /Lavoro 3[.,]0 s, =Casa 4[.,]0 s/);
     assert.match(text, /\+12[.,]0/);
     assert.match(text, new RegExp(strings.resourceTestSummaryMainTitle.replace(/[()]/g, "\\$&")));
     assert.match(text, /\+3[.,]0/);
@@ -244,7 +291,16 @@ test("writes the summary in the app's language, with every template filled", () 
 
     // Counted from Node.js's start, a short test: no Node.js time, no JavaScript line.
     const short = format(run({ minutes: 10, startup: STARTUP_EVENTS.filter((event) => event.mark !== "node") }));
-    assert.doesNotMatch(short, /\{\w+\}|resourceTestSummary|Node\.js \d|JavaScript/, language);
-    assert.match(short, /1[.,]2 s, .+ 2[.,]0 s, .+ 2[.,]6 s/);
+    assert.doesNotMatch(short, /\{\w+\}|resourceTestSummary|resourceTestStartup|Node\.js \d|JavaScript/, language);
+    assert.match(short, /0[.,]5 s, .+ 0[.,]7 s, .+ 0[.,]8 s, .+ 2[.,]3 s, .+ 2[.,]4 s/);
+
+    // The first step starts at the process's creation, or at Node.js's start.
+    const first = (startup) => format(run({ minutes: 3, startup })).split("\r\n").find((line) => line.includes(" → "));
+    assert.equal(first([{ type: "startup", mark: "node", seconds: 2 }, { type: "startup", mark: "script", seconds: 2.2 }]),
+      `- ${strings.resourceTestSummaryLongestStep.replace("{from}", strings.resourceTestStartupCreated)
+        .replace("{to}", strings.resourceTestStartupNode).replace("{seconds}", language === "it" ? "2,0" : "2.0")}`);
+    assert.equal(first([{ type: "startup", mark: "script", seconds: 1.5 }]),
+      `- ${strings.resourceTestSummaryLongestStep.replace("{from}", strings.resourceTestStartupNode)
+        .replace("{to}", strings.resourceTestStartupScript).replace("{seconds}", language === "it" ? "1,5" : "1.5")}`);
   }
 });

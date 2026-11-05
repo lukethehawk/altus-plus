@@ -19,7 +19,9 @@
 //    the three accounts into a CSV file; Help → End Resource Test writes the
 //    summary and restarts the app normally (it also opens Explorer there);
 // 7. the installer replaces a fake original Altus (/S --replace-altus), the
-//    installed app opens its tabs and settings and registers autostart;
+//    installed app opens its tabs and settings and registers autostart; on
+//    the next start it leaves the entry alone (no reg.exe), and writes it
+//    again once deleted;
 // 8. reinstalling never migrates again or touches the Altus + profile;
 // 9. uninstalling removes the program and keeps the profile.
 //
@@ -849,11 +851,17 @@ async function checkResourceTest() {
       }
       // Quoted: the description has commas.
       if (!/,event,"test started: Altus \+ /.test(csv.text)) failures.push("the test file does not say what was tested");
-      // Startup moments, in order (Node.js's start only when counting from the process's creation).
-      const at = (event) => csv.text.match(new RegExp(`^([\\d.]+),[^,]+,event,${event}\\r?$`, "m"))?.[1];
-      const startup = ["Node.js started", "main script started", "Electron ready", "window created"].map((event) => [event, at(event)]);
+      // Startup moments, in order (Node.js's start only when counting from the
+      // process's creation), from Electron's "ready" on with the main
+      // process's CPU time since the previous one.
+      const cpuText = " \\(main process CPU since the previous step: [\\d.]+ s\\)";
+      const at = (event, cpu) => csv.text.match(new RegExp(`^([\\d.]+),[^,]+,event,${event}${cpu ? cpuText : ""}\\r?$`, "m"))?.[1];
+      const startup = [
+        ["Node.js started"], ["main script started"], ["Electron ready", true], ["partitions checked", true],
+        ["autostart checked", true], ["window created", true],
+      ].map(([event, cpu]) => [event, at(event, cpu)]);
       const found = startup.filter(([, seconds]) => seconds !== undefined);
-      for (const [event, seconds] of startup.slice(1)) if (seconds === undefined) failures.push(`the test file has no "${event}"`);
+      for (const [event, seconds] of startup.slice(1)) if (seconds === undefined) failures.push(`the test file has no "${event}" (with its CPU time from "Electron ready" on)`);
       if (found.some(([, seconds], index) => index > 0 && Number(seconds) < Number(found[index - 1][1]))) {
         failures.push(`startup moments out of order: ${JSON.stringify(found)}`);
       }
@@ -883,6 +891,7 @@ async function checkResourceTest() {
       for (const name of names) if (!summary.includes(`${name}:`)) failures.push(`the summary does not list ${name}`);
       if (!summary.includes("resource test")) failures.push(`the summary has no title: ${summary.slice(0, 80)}`);
       if (!/Times since (Windows created the process|Node\.js started):/.test(summary)) failures.push("the summary has no startup times");
+      if (!/Longest step: .+ → .+, [\d.]+ s/.test(summary)) failures.push("the summary has no longest startup step");
       if (!summary.includes("Main process (private memory)")) failures.push("the summary has no main process section");
     }
     const samples = fs.readdirSync(folder).filter((name) => name.endsWith(".csv"));
@@ -970,6 +979,50 @@ function writeRunEntry(name, value) {
   return new Promise((resolve, reject) => key.set(name, Winreg.REG_SZ, value, (error) => (error ? reject(error) : resolve())));
 }
 
+function removeRunEntry(name) {
+  return new Promise((resolve, reject) => runKey().key.remove(name, (error) => (error ? reject(error) : resolve())));
+}
+
+/**
+ * Two more starts of the installed app once its autostart entry is set: the
+ * first leaves the entry alone without running reg.exe; after the entry is
+ * deleted, the second writes it again although the app remembers writing it.
+ */
+async function checkAutostartOnRestarts(expectedEntry) {
+  const failures = [];
+  // The app's first autostart line, then it is stopped.
+  const start = async (what) => {
+    const app = launch(install.exe, []);
+    try {
+      return await waitFor(`the app's autostart line (${what})`, 60_000, () => {
+        const line = app.output.match(/Autostart (entry (unchanged|set|removed)|update failed)[^\r\n]*/)?.[0];
+        if (!line && app.exited) throw new Error(`the app exited (code ${app.exitCode})`);
+        return line;
+      });
+    } finally {
+      await stop(app);
+    }
+  };
+  try {
+    const unchanged = await start("entry already set");
+    if (unchanged !== "Autostart entry unchanged (set)") failures.push(`next start: "${unchanged}" instead of leaving the entry alone`);
+    const record = readJson(path.join(APPDATA, PROFILE_FOLDER, "autostart.json"));
+    if (record.written?.toLowerCase() !== expectedEntry.toLowerCase() || record.legacyRemoved !== true) {
+      failures.push(`autostart.json is ${JSON.stringify(record)}, expected the entry written and the old one removed`);
+    }
+    await removeRunEntry(packageJson.productName);
+    const rewritten = await start("entry deleted");
+    if (rewritten !== "Autostart entry set") failures.push(`after deleting the entry: "${rewritten}" instead of writing it again`);
+    const { value } = await readRunEntry(packageJson.productName);
+    if (value?.trim().toLowerCase() !== expectedEntry.toLowerCase()) {
+      failures.push(`after deleting the entry, it is ${value ? `'${value}'` : "still missing"}`);
+    }
+  } catch (error) {
+    failures.push(error.message);
+  }
+  return failures;
+}
+
 async function checkInstallReplacingOriginal() {
   const installer = findInstaller();
   const profile = path.join(APPDATA, PROFILE_FOLDER);
@@ -1024,6 +1077,7 @@ async function checkInstallReplacingOriginal() {
       : "app log: no autostart line (the update never finished)");
     saveArtifact("installed-app.log", result.output ?? "");
   }
+  if (!result.failures.length) result.failures.push(...(await checkAutostartOnRestarts(expectedEntry)));
   return result;
 }
 
@@ -1086,7 +1140,7 @@ const checks = [
 ];
 if (runInstaller) {
   checks.push(
-    ["7. Installer replaces the original Altus; app opens its tabs and settings", checkInstallReplacingOriginal],
+    ["7. Installer replaces the original Altus; app opens its tabs and settings; autostart written only when needed", checkInstallReplacingOriginal],
     ["8. Reinstall leaves the profile and the original data alone", checkReinstall],
     ["9. Uninstall removes the program and keeps the profile", checkUninstall],
   );

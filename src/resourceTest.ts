@@ -4,7 +4,7 @@ import { type ResourceGroup } from "./utils/resources";
 import {
   CSV_HEADER,
   type MainMemory,
-  STARTUP_EVENT_TEXT,
+  startupEventText,
   type StartupEvent,
   type StartupTimes,
   type TestEvent,
@@ -73,9 +73,12 @@ export class ResourceTestRecorder {
     }
     fs.writeFileSync(this.files.samples, `${CSV_HEADER}\r\n`);
     this.note(this.options.description, 0);
-    for (const event of startupEvents(this.options.startup, this.startedAt)) this.recordStartup(event);
-    // The recorder starts right after the window is created.
-    this.recordStartup({ type: "startup", mark: "window", seconds: this.seconds() });
+    const startup = startupEvents(this.options.startup, this.startedAt);
+    for (const event of startup) this.recordStartup(event);
+    // Without its time, the window was created just before the recorder started.
+    if (!startup.some((event) => event.mark === "window")) {
+      this.recordStartup({ type: "startup", mark: "window", seconds: this.seconds() });
+    }
     this.takeSample();
     this.flushTimer = setInterval(() => this.flush(), FLUSH_MS);
   }
@@ -154,7 +157,7 @@ export class ResourceTestRecorder {
   }
 
   private recordStartup(event: StartupEvent) {
-    this.record(event, STARTUP_EVENT_TEXT[event.mark]);
+    this.record(event, startupEventText(event));
   }
 
   private note(description: string, seconds = this.seconds()) {
