@@ -1,5 +1,5 @@
 // First, so that it records when the app's own code started.
-import { mainScriptStartedAt } from "./startTime";
+import { cpuTimeMs, mainScriptCpuMs, mainScriptStartedAt } from "./startTime";
 import {
   app,
   BrowserWindow,
@@ -49,7 +49,14 @@ import {
 import { getPartitionsToPrune } from "./utils/partitions";
 import { recoverRendererOnFailure } from "./utils/rendererRecovery";
 import { REPOSITORY_URL } from "./utils/updates";
-import { AUTOSTART_FLAG, autostartPathFor, getStartupWindowMode } from "./utils/startup";
+import {
+  AUTOSTART_FLAG,
+  autostartChange,
+  autostartCommand,
+  autostartEntryName,
+  autostartPathFor,
+  getStartupWindowMode,
+} from "./utils/startup";
 import { attachEnterKeys } from "./utils/keyboard";
 import { isMuteActive } from "./utils/notifications";
 import { formatTrayTooltip } from "./utils/tray";
@@ -61,6 +68,8 @@ import {
   formatSummary,
   localTime,
   relaunchArgs,
+  type StartupMark,
+  type StartupTimes,
 } from "./utils/resourceTest";
 import { ResourceTestRecorder } from "./resourceTest";
 import {
@@ -133,9 +142,21 @@ function updateTrayTooltip(tabs?: Tab[]) {
 // until Help → End Resource Test or quitting, never past this process.
 const resourceTestMode = process.argv.includes(RESOURCE_TEST_FLAG);
 let resourceTest: ResourceTestRecorder | undefined;
-const nodeStartedAt = Date.now() - process.uptime() * 1000;
-let electronReadyAt: number | undefined;
+const startupCpuMs: Partial<Record<StartupMark, number>> = { script: mainScriptCpuMs };
+// The resource test's startup times; the steps of the "ready" handler are
+// filled in as they finish.
+const startupTimes: StartupTimes = {
+  nodeStartedAt: Date.now() - process.uptime() * 1000,
+  mainScriptStartedAt,
+  cpuMs: startupCpuMs,
+};
 const MB = 1024 * 1024;
+
+/** Now (ms since the epoch), noting the main process's CPU time at this startup moment. */
+function startupMoment(mark: StartupMark): number {
+  startupCpuMs[mark] = cpuTimeMs();
+  return Date.now();
+}
 
 /** Restarts Altus + with the same arguments, in or out of the resource test. */
 function relaunch(inResourceTest: boolean) {
@@ -149,12 +170,7 @@ function startResourceTest(mainWindow: BrowserWindow) {
   const ram = String(Math.round(os.totalmem() / 1024 ** 3));
   const recorder: ResourceTestRecorder = new ResourceTestRecorder({
     directory: path.join(app.getPath("userData"), RESOURCE_TEST_FOLDER),
-    startup: {
-      processCreatedAt: app.getAppMetrics().find((metric) => metric.pid === process.pid)?.creationTime,
-      nodeStartedAt,
-      mainScriptStartedAt,
-      electronReadyAt,
-    },
+    startup: startupTimes,
     sample: () => sampleResourceUsage(mainWindow),
     mainMemory: () => {
       const memory = process.memoryUsage();
@@ -241,6 +257,82 @@ function sampleResourceUsage(mainWindow: BrowserWindow) {
       workerProcesses: workerProcessIds.size,
     }
   );
+}
+
+/** What updateAutostart last did, in autostart.json in the profile. */
+type AutostartRecord = {
+  /** The command it wrote for the entry (autostartCommand), or null. */
+  written: string | null;
+  /** The old test builds' entry is gone, or was never there. */
+  legacyRemoved: boolean;
+};
+
+/**
+ * Writes or removes the autostart entry when it differs from the setting.
+ * Checking goes through Electron, which reads the registry itself; reg.exe
+ * (through auto-launch) only runs when something has to change, since
+ * starting it blocks the app until Windows has launched it.
+ */
+function updateAutostart() {
+  const wanted = getSettingWithDefault("autoLaunch");
+  const execPath = process.execPath;
+  const command = autostartCommand(execPath);
+  let record: Store<AutostartRecord> | undefined;
+  // Unsure: write or remove the entry, as every start used to.
+  let change: "enable" | "disable" | "none" = wanted ? "enable" : "disable";
+  let legacyRemoved = false;
+  try {
+    // What this installation last wrote, which Electron's list cannot show.
+    record = new Store<AutostartRecord>({ name: "autostart", defaults: { written: null, legacyRemoved: false } });
+    const { written } = record.store;
+    legacyRemoved = record.store.legacyRemoved;
+    change = autostartChange({
+      wanted,
+      entries: app.getLoginItemSettings({ path: execPath }).launchItems,
+      name: autostartEntryName(execPath),
+      written,
+      command,
+    });
+  } catch (error) {
+    console.warn("Could not check the autostart entry", error);
+  }
+  const remember = (values: Partial<AutostartRecord>) => {
+    try {
+      record?.set(values);
+    } catch (error) {
+      console.warn("Could not save the autostart state", error);
+    }
+  };
+
+  if (change === "none") {
+    console.info(`Autostart entry unchanged (${wanted ? "set" : "absent"})`);
+  } else {
+    // isHidden adds AUTOSTART_FLAG, so the app knows it started with Windows.
+    const autoLauncher = new AutoLaunch({ name: APP_NAME, isHidden: true });
+    (change === "enable" ? autoLauncher.enable() : autoLauncher.disable())
+      .then(() => {
+        remember({ written: change === "enable" ? command : null });
+        console.info(`Autostart entry ${change === "enable" ? "set" : "removed"}`);
+      })
+      .catch((error) => console.warn("Autostart update failed", error));
+  }
+
+  // The test builds registered autostart under their own name; drop that
+  // entry once so the old executable is not launched next to this one.
+  // Without the path, auto-launch would remove this app's entry ("Altus +")
+  // instead. It may point anywhere, so only reg.exe can remove it.
+  if (legacyRemoved) return;
+  new AutoLaunch({
+    name: LEGACY_TEST_BUILD_NAME,
+    path: autostartPathFor(LEGACY_TEST_BUILD_NAME, execPath),
+  })
+    .disable()
+    .then(
+      () => console.info("Autostart entry of the old test builds cleared"),
+      // Also when there was none: reg.exe reports that in the system's language.
+      () => undefined
+    )
+    .then(() => remember({ legacyRemoved: true }));
 }
 
 // Recently completed downloads by id: the UI asks to reveal an id, so a file
@@ -435,7 +527,13 @@ if (!singleInstanceLock) {
   });
 
   app.on("ready", () => {
-    electronReadyAt = Date.now();
+    startupTimes.electronReadyAt = startupMoment("ready");
+    if (resourceTestMode) {
+      // Read here rather than when the test starts: a process's first CPU
+      // reading only sets where its CPU counts from, so the test's first
+      // sample then covers the rest of the startup instead of a millisecond.
+      startupTimes.processCreatedAt = app.getAppMetrics().find((metric) => metric.pid === process.pid)?.creationTime;
+    }
     if (process.platform === "win32") app.setAppUserModelId(APP_ID);
     const userAgentFallback = app.userAgentFallback;
     app.userAgentFallback = userAgentFallback.replace(
@@ -452,32 +550,15 @@ if (!singleInstanceLock) {
       electronTabStore.get("previouslyClosedTab"),
       app.getPath("userData")
     );
+    startupTimes.partitionsCheckedAt = startupMoment("partitions");
 
     // A smoke-test run on a throwaway profile must not rewrite the autostart
     // entry of the installed app, which shares the same name.
-    if (!hasExplicitProfileDirectory()) {
-      // isHidden adds AUTOSTART_FLAG, so the app knows it started with Windows.
-      const autoLauncher = new AutoLaunch({
-        name: APP_NAME,
-        isHidden: true,
-      });
-      // disable() rejects when no entry exists yet; nothing to do then.
-      const autoLaunch = getSettingWithDefault("autoLaunch");
-      (autoLaunch ? autoLauncher.enable() : autoLauncher.disable())
-        .then(() => console.info(`Autostart entry ${autoLaunch ? "set" : "removed"}`))
-        .catch((error) => console.warn("Autostart update failed", error));
-      // The test builds registered autostart under their own name; drop that
-      // entry so the old executable is not launched next to this one. Without
-      // the path, auto-launch would remove this app's entry ("Altus +") instead.
-      new AutoLaunch({
-        name: LEGACY_TEST_BUILD_NAME,
-        path: autostartPathFor(LEGACY_TEST_BUILD_NAME, process.execPath),
-      })
-        .disable()
-        .catch(() => undefined);
-    }
+    if (!hasExplicitProfileDirectory()) updateAutostart();
+    startupTimes.autostartCheckedAt = startupMoment("autostart");
 
     const mainWindow = createWindow();
+    startupTimes.windowCreatedAt = startupMoment("window");
     if (resourceTestMode) startResourceTest(mainWindow);
 
     contextMenu();

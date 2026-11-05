@@ -20,6 +20,10 @@ const MIN_GROWTH_SECONDS = 30 * 60;
 /** JavaScript memory rises and falls with garbage collection: the lowest value over this long is compared. */
 const JS_WINDOW_SECONDS = 10 * 60;
 
+/** The startup moments, in order; "node" only when counting from the process's creation. */
+export const STARTUP_MARKS = ["node", "script", "ready", "partitions", "autostart", "window"] as const;
+export type StartupMark = (typeof STARTUP_MARKS)[number];
+
 /** Moments of the startup, in ms since the epoch. */
 export type StartupTimes = {
   /** When Windows created the main process, as Electron reports it. */
@@ -30,6 +34,13 @@ export type StartupTimes = {
   mainScriptStartedAt: number;
   /** Electron's "ready" event. */
   electronReadyAt?: number;
+  /** The steps of the "ready" handler before the window: unused partitions removed, autostart entry checked. */
+  partitionsCheckedAt?: number;
+  autostartCheckedAt?: number;
+  /** Right after the window was created. */
+  windowCreatedAt?: number;
+  /** CPU time the main process had used at each moment (ms, process.cpuUsage()), where read. */
+  cpuMs?: Partial<Record<StartupMark, number>>;
 };
 
 /**
@@ -49,23 +60,52 @@ export function testStartTime(times: StartupTimes): number {
 
 /**
  * The startup moments as events, in seconds from the test's start; Node.js's
- * start only when the test counts from the process's creation.
+ * start only when the test counts from the process's creation. Each one has
+ * the main process's CPU time since the previous one, when both were read.
  */
 export function startupEvents(times: StartupTimes, startedAt: number): StartupEvent[] {
-  const at = (time: number) => Math.max(0, (time - startedAt) / SECOND);
-  return [
-    ...(startedAt < times.nodeStartedAt ? [{ mark: "node" as const, seconds: at(times.nodeStartedAt) }] : []),
-    { mark: "script" as const, seconds: at(times.mainScriptStartedAt) },
-    ...(times.electronReadyAt === undefined ? [] : [{ mark: "ready" as const, seconds: at(times.electronReadyAt) }]),
-  ].map((event) => ({ type: "startup" as const, ...event }));
+  const at: Record<StartupMark, number | undefined> = {
+    node: startedAt < times.nodeStartedAt ? times.nodeStartedAt : undefined,
+    script: times.mainScriptStartedAt,
+    ready: times.electronReadyAt,
+    partitions: times.partitionsCheckedAt,
+    autostart: times.autostartCheckedAt,
+    window: times.windowCreatedAt,
+  };
+  const events: StartupEvent[] = [];
+  let previous: StartupMark | undefined;
+  for (const mark of STARTUP_MARKS) {
+    const time = at[mark];
+    if (time === undefined) continue;
+    const cpu = times.cpuMs?.[mark];
+    const previousCpu = previous && times.cpuMs?.[previous];
+    events.push({
+      type: "startup",
+      mark,
+      seconds: Math.max(0, (time - startedAt) / SECOND),
+      ...(cpu !== undefined && previousCpu !== undefined ? { cpuSeconds: Math.max(0, (cpu - previousCpu) / SECOND) } : {}),
+    });
+    previous = mark;
+  }
+  return events;
 }
 
-export const STARTUP_EVENT_TEXT: Record<StartupEvent["mark"], string> = {
+export const STARTUP_EVENT_TEXT: Record<StartupMark, string> = {
   node: "Node.js started",
   script: "main script started",
   ready: "Electron ready",
+  partitions: "partitions checked",
+  autostart: "autostart checked",
   window: "window created",
 };
+
+/** "Electron ready (main process CPU since the previous step: 0.12 s)". */
+export function startupEventText(event: StartupEvent): string {
+  const text = STARTUP_EVENT_TEXT[event.mark];
+  return event.cpuSeconds === undefined
+    ? text
+    : `${text} (main process CPU since the previous step: ${event.cpuSeconds.toFixed(2)} s)`;
+}
 
 /** The main process's JavaScript memory (process.memoryUsage()), in MB. */
 export type MainMemory = { jsHeapUsedMB: number; jsHeapTotalMB: number; jsExternalMB: number };
@@ -187,7 +227,13 @@ export function toTestSample(seconds: number, groups: ResourceGroup[], mainMemor
   };
 }
 
-export type StartupEvent = { type: "startup"; mark: "node" | "script" | "ready" | "window"; seconds: number };
+export type StartupEvent = {
+  type: "startup";
+  mark: StartupMark;
+  seconds: number;
+  /** The main process's CPU time since the previous moment. */
+  cpuSeconds?: number;
+};
 
 export type TestEvent =
   | StartupEvent
@@ -204,7 +250,9 @@ type Growth = {
 export type TestSummary = {
   durationSeconds: number;
   /** Seconds of each startup moment; "node" only when counting from the process's creation. */
-  startup: Partial<Record<StartupEvent["mark"], number>>;
+  startup: Partial<Record<StartupMark, number>>;
+  /** The longest gap between two startup moments ("start": where the test counts from). */
+  longestStartupStep?: { from: StartupMark | "start"; to: StartupMark; seconds: number; cpuSeconds?: number };
   windowShownSeconds?: number;
   accountsLoaded: { name: string; seconds: number }[];
   peakCpu?: { value: number; seconds: number };
@@ -315,10 +363,26 @@ export function summarizeResourceTest(
 
   const last = samples[samples.length - 1];
   const startupTimes: TestSummary["startup"] = {};
-  for (const event of events) if (event.type === "startup") startupTimes[event.mark] = event.seconds;
+  let longestStartupStep: TestSummary["longestStartupStep"];
+  let previous: StartupEvent | undefined;
+  for (const event of events) {
+    if (event.type !== "startup") continue;
+    startupTimes[event.mark] = event.seconds;
+    const seconds = event.seconds - (previous?.seconds ?? 0);
+    if (!longestStartupStep || seconds > longestStartupStep.seconds) {
+      longestStartupStep = {
+        from: previous?.mark ?? "start",
+        to: event.mark,
+        seconds,
+        ...(event.cpuSeconds === undefined ? {} : { cpuSeconds: event.cpuSeconds }),
+      };
+    }
+    previous = event;
+  }
   return {
     durationSeconds,
     startup: startupTimes,
+    longestStartupStep,
     windowShownSeconds: events.find((event) => event.type === "window-shown")?.seconds,
     accountsLoaded,
     peakCpu: peak("cpuPercent"),
@@ -343,6 +407,17 @@ export function formatDuration(seconds: number): string {
   return minutes ? `${minutes} min ${total % 60} s` : `${total} s`;
 }
 
+/** Translation keys of the startup moments' names; "created" is where the test counts from. */
+const STARTUP_LABEL_KEYS: Record<StartupMark | "created", string> = {
+  created: "resourceTestStartupCreated",
+  node: "resourceTestStartupNode",
+  script: "resourceTestStartupScript",
+  ready: "resourceTestStartupReady",
+  partitions: "resourceTestStartupPartitions",
+  autostart: "resourceTestStartupAutostart",
+  window: "resourceTestStartupWindow",
+};
+
 /** The summary file, in the app's language. */
 export function formatSummary(
   summary: TestSummary,
@@ -361,16 +436,22 @@ export function formatSummary(
     "",
     line("resourceTestSummaryStartup"),
   ];
-  const { node, script, ready, window } = summary.startup;
-  if (script !== undefined) {
-    const times = {
-      script: seconds(script),
-      ready: ready === undefined ? "—" : seconds(ready),
-      window: window === undefined ? "—" : seconds(window),
-    };
-    lines.push(`- ${node === undefined
-      ? line("resourceTestSummaryStartupTimesFromNode", times)
-      : line("resourceTestSummaryStartupTimes", { ...times, node: seconds(node) })}`);
+  const fromCreation = summary.startup.node !== undefined;
+  const label = (mark: StartupMark | "start") =>
+    translate(STARTUP_LABEL_KEYS[mark === "start" ? (fromCreation ? "created" : "node") : mark]);
+  const times = STARTUP_MARKS.flatMap((mark) => {
+    const value = summary.startup[mark];
+    return value === undefined ? [] : [`${label(mark)} ${seconds(value)} s`];
+  });
+  if (times.length) {
+    lines.push(`- ${line(fromCreation ? "resourceTestSummaryStartupTimes" : "resourceTestSummaryStartupTimesFromNode", { times: times.join(", ") })}`);
+  }
+  const step = summary.longestStartupStep;
+  if (step) {
+    const values = { from: label(step.from), to: label(step.to), seconds: seconds(step.seconds) };
+    lines.push(`- ${step.cpuSeconds === undefined
+      ? line("resourceTestSummaryLongestStep", values)
+      : line("resourceTestSummaryLongestStepCpu", { ...values, cpu: number(step.cpuSeconds, 2) })}`);
   }
   if (summary.windowShownSeconds !== undefined) {
     lines.push(`- ${line("resourceTestSummaryWindowShown", { seconds: seconds(summary.windowShownSeconds) })}`);
