@@ -1042,6 +1042,9 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
   });
 
   ipcMain.on("message-count", (event, detail: unknown) => {
+    // Quitting or restarting destroys the window first; counts the tabs sent
+    // meanwhile still arrive (often right after a start, while they sync).
+    if (mainWindow.isDestroyed()) return;
     if (event.sender.getType() !== "webview" || !isTrustedWhatsAppURL(event.sender.getURL())) return;
     if (!detail || typeof detail !== "object") return;
     const { tabId, messageCount } = detail as { tabId?: unknown; messageCount?: unknown };
@@ -1128,6 +1131,7 @@ async function initializeI18N(mainWindow: BrowserWindow) {
     if (process.platform === "darwin" && tray) {
       app.dock?.setMenu(getLocalizedTrayMenu());
     }
+    if (mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("reload-custom-title-bar");
     mainWindow.webContents.send("reload-translations");
     if (resourceTest) {

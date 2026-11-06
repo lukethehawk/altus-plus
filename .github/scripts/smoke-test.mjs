@@ -17,7 +17,9 @@
 //    It plays a near-silent tone and shows a silent notification for a moment;
 // 6. Help → Run Resource Test restarts the app into the test, which records
 //    the three accounts into a CSV file; Help → End Resource Test writes the
-//    summary and restarts the app normally (it also opens Explorer there);
+//    summary and restarts the app normally (it also opens Explorer there).
+//    The tabs send unread counts nonstop while the app closes to restart;
+//    one reaching the destroyed window used to hold it with an error box;
 // 7. the installer replaces a fake original Altus (/S --replace-altus), the
 //    installed app opens its tabs and settings and registers autostart; on
 //    the next start it leaves the entry alone (no reg.exe), and writes it
@@ -808,6 +810,15 @@ function instancesOnProfile(profile) {
     .map((process) => process.ProcessId);
 }
 
+/**
+ * Run in a WhatsApp tab's page: changes its title every 20 ms (faster floods
+ * the app window), so its preload sends unread counts nonstop.
+ */
+const TITLE_FLOOD = `(() => {
+  let count = 0;
+  setInterval(() => { document.title = "(" + (++count % 100) + ") WhatsApp"; }, 20);
+})()`;
+
 async function checkResourceTest() {
   const failures = [];
   const notes = [];
@@ -822,12 +833,25 @@ async function checkResourceTest() {
   try {
     // Help → Run Resource Test… → Restart and Measure.
     cdp = await attachWhen(port, "Help → Run Resource Test", 90_000, async (page) => (await menuIds(page)).includes("resource-test"));
+    // Unread counts in flight while the app closes, as when the accounts sync
+    // right after a start: every tab changes its title nonstop. A count that
+    // reached the destroyed window stopped the restart with an error box.
+    await waitFor("the tabs to know their IDs", 60_000, () => cdp.evaluate(`Promise.all([...document.querySelectorAll("webview")]
+      .map((webview) => webview.executeJavaScript("document.body?.dataset.tabId ?? ''").catch(() => "")))
+      .then((ids) => ids.length === ${BACKGROUND_TABS.length} && ids.every(Boolean))`));
+    await cdp.evaluate(`Promise.all([...document.querySelectorAll("webview")]
+      .map((webview) => webview.executeJavaScript(${JSON.stringify(TITLE_FLOOD)})))`);
     await cdp.evaluate('window.clickMenuItem("resource-test")');
     await waitFor("the Resource Test dialog", 10_000, () => cdp.evaluate('!!document.querySelector("[data-resource-test-start]")'));
     await cdp.evaluate('document.querySelector("[data-resource-test-start]").click()').catch(() => undefined);
     cdp.close();
     cdp = undefined;
-    await waitFor("the app to restart into the test", 30_000, () => first.exited);
+    try {
+      await waitFor("the app to restart into the test", 30_000, () => first.exited);
+    } catch (error) {
+      const errors = first.output.split(/\r?\n/).filter((line) => /Exception|Error/.test(line)).slice(0, 3);
+      throw new Error(`${error.message}; ${errors.length ? `app log: ${errors.join(" | ")}` : "no error in its log (an error box may be holding it)"}`);
+    }
 
     cdp = await attachWhen(port, "the app restarted in the resource test", 90_000, async (page) => (await menuIds(page)).includes("end-resource-test"));
     const names = BACKGROUND_TABS.map((tab) => tab.name);
