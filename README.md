@@ -30,7 +30,9 @@ The original project is no longer updated. Altus + keeps it running on a current
 | 📥 **Unread at a glance** | Hover over the tray icon to see each account's unread chats, and which accounts are muted. |
 | 🔊 **Background audio** | Voice messages keep playing when you switch tab; inactive tabs are never suspended or muted. |
 | 📎 **Download notice** | "Attachment saved · Show in folder" after each download. |
-| 📊 **Resource usage** | Help → Resource Usage shows each account's CPU and memory, refreshed while open. Help → Run Resource Test records them from startup into a CSV file with a summary, until you end it. |
+| ⌨️ **Enter keys** | With Settings → *Prevent sending message on Enter*, Enter adds a new line and Ctrl+Enter sends. With *Send with Right Shift + Enter*, Right Shift + Enter sends and Left Shift + Enter adds a new line. |
+| 🌙 **Starts in the tray** | With Settings → *Launch at system startup* and *Start in Tray with Windows*, Altus + starts at Windows sign-in with only its tray icon; the accounts connect and notify as usual. Opened from the Start menu, it always shows the window. |
+| 📊 **Resource usage** | Help → Resource Usage shows each account's CPU and memory, refreshed while open. Help → Run Resource Test records them from startup into a CSV file until you end it, with a summary of how long startup took and how memory changed. |
 | 🩹 **Crash recovery** | A crashed or frozen account reloads on its own without touching the others. |
 | ⬆️ **In-app updates** | New releases download in the background, are verified (SHA512) and install with one click. A notice stays on screen while they install. |
 | 🌐 **English / Italiano** | Settings → Language, applied at once. |
@@ -68,6 +70,7 @@ Updates and reinstalls never ask again. For unattended installs, `Altus-Plus-Set
 | New tab | `Ctrl+T` |
 | Edit current tab | `Ctrl+E` |
 | Close current tab | `Ctrl+W` |
+| Tab developer tools | `Ctrl+Shift+D` |
 | Reopen closed tab | `Ctrl+Shift+T` |
 | Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | First / last tab | `Ctrl+1` / `Ctrl+9` |
