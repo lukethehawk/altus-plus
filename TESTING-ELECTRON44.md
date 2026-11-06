@@ -193,7 +193,10 @@ fails it uploads no installer.
    locally, the check plays a near-silent tone and shows a silent
    notification for a moment.
 6. Help → Run Resource Test… → Restart and Measure restarts the app into
-   the test with three tabs. The CSV in `resource-tests` gets a header,
+   the test with three tabs, which change their title every 20 ms
+   beforehand, so unread counts keep arriving while the app closes (one
+   reaching the destroyed window used to stop the restart with "Object has
+   been destroyed"). The CSV in `resource-tests` gets a header,
    the "test started" line, the startup moments in order ("main script
    started", "Electron ready", "partitions checked", "autostart checked",
    "window created", from "Electron ready" on with the main process's CPU
