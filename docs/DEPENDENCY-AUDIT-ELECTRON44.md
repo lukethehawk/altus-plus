@@ -192,7 +192,8 @@ What is left needs major upgrades. None of it ships in the app:
 | `vite` 4.5.14 (12), `esbuild` 0.18.20 (1) | 13 | Dev server only (`yarn start` on the developer's machine); CI and releases run `vite build`. Alert #141 checked in detail in the triage of 2026-11-09 | Forge's Vite plugin with Vite 5 or later. **2026-11-09, plus.21:** Forge 8's Vite plugin with Vite 8.3.7; `vite` 4 and `esbuild` are gone from `yarn.lock` |
 | `extract-zip` 2.0.1 | 2 | `@electron/packager` unpacks the Electron zip, downloaded from GitHub and checked against its SHASUMS | No fixed version exists. **2026-11-09, plus.21:** `@electron/packager` 20.3 (Forge 8) no longer uses it; gone from `yarn.lock` |
 | `app-builder-lib` 26.0.12 (AppImage search path), `builder-util-runtime` 9.3.1 (token leak on redirects) | 2 | AppImage is Linux only; the token issue is in electron-builder's publisher, which we do not use. The shipped updater already uses builder-util-runtime 9.7.0 | app-builder-lib ≥ 26.15. **Fixed 2026-11-09: 26.18.1** (builder-util-runtime 9.7.1) |
-| `minimatch` 9.0.9 / 10.2.6 (≥ 7, < 11.0.1) | 1 | Build tooling; loaded but compiles no pattern in `yarn make` (triage of 2026-11-09). **With Forge 8:** one fixed pattern at the default level 1 (update for plus.21 below) | Upgrading its parents (fixed only in 11.0.1) |
+| `minimatch` 9.0.9 / 10.2.6 (≥ 7, < 11.0.1) | 1 | Build tooling; loaded but compiles no pattern in `yarn make` (triage of 2026-11-09). **With Forge 8:** one fixed pattern at the default level 1 (update for plus.21 below), plus one search pattern at level 2 in the copy bundled inside `glob` 13, built from packager's temporary folder (triage of #139) | Upgrading its parents (fixed only in 11.0.1) |
+| `glob` 13.0.7 (≥ 9, ≤ 14.0.1) | 1 (#139, reopened 2026-11-09) | Build only: `@electron/asar`'s file crawl in `yarn make`, with no AbortSignal (triage of #139 below) | `@electron/asar` on glob 14.0.2 or later |
 | `@babel/core` 7.26.10 (low) | 1 | Follows source-map comments in our own sources while compiling the UI. Left out on purpose: it is the UI compiler | Next Babel update. **Fixed 2026-11-09: 7.29.13**, built UI unchanged |
 
 npm also reports some build-only advisories without an open Dependabot alert
@@ -375,8 +376,8 @@ Content-Security-Policy. The bundles contain no `import.meta`, and
 
 | | Before | After |
 |---|---:|---:|
-| Open Dependabot alerts | 24 | 1 expected (#142), to be confirmed after GitHub's rescan |
-| Alerts whose vulnerable range still matches a version in `yarn.lock` | 24 | 1 (#142: `minimatch` 9.0.9 / 10.2.6) |
+| Open Dependabot alerts | 24 | 2 after the merge: #142, and #139 (`glob`), which GitHub reopened (triage below) |
+| Alerts open before the merge whose vulnerable range still matches a version in `yarn.lock` | 24 | 1 (#142: `minimatch` 9.0.9 / 10.2.6) |
 | `yarn npm audit --all --recursive`, ignore list off (critical / high / moderate / low) | 1 / 13 / 15 / 4 | 0 / 0 / 4 / 1 |
 | Same, production environment, high or critical | 0 | 0 |
 
@@ -396,8 +397,77 @@ same: `**/{.**,**}/**/*.node`, level 1, from `@electron/asar`'s
 `shouldUnpackPath`. That is packager 20's built-in default for `asar: true`
 (`createAsarOpts` in `@electron/packager/dist/common.js`), not a pattern
 from outside the repository, and the advisory needs level 2 or more.
-`glob` and the app-builder-lib / `@electron/universal` copies compiled
-nothing. The alert stays open until its parents move to minimatch 11.
+The app-builder-lib and `@electron/universal` copies compiled nothing.
+**Correction (triage of #139 below):** this trace could not see `glob` 13.
+The file `import "glob"` loads (`dist/*/index.min.js`) carries its own copy
+of minimatch instead of using the installed one, and it compiles at level 2.
+The alert stays open until its parents move to minimatch 11.
+
+## Triage 2026-11-09 (Dependabot alert #139, reopened after Forge 8)
+
+After the merge for plus.21 (`master` @ `2b1cbcc`) the 23 expected alerts
+closed. GitHub also marked as fixed five alerts it had already closed as
+development only (`tar` #86, #87, #88, #95 and `image-size` #117), and
+reopened one:
+
+| Alert | Advisory | Affected | Locked (in range) | First fix |
+|---|---|---|---|---|
+| #139 `glob` | GHSA-3g3m-2fjr-6pw4: a search cancelled with an AbortSignal keeps walking the file system | ≥ 9.0.0, ≤ 14.0.1 | 13.0.7 (10.5.0 only on macOS, see below) | 14.0.2 |
+
+#139 was opened on 2026-11-02 for `glob` 10.5.0 and closed by GitHub as
+development only (the "auto-dismissed" note above). Forge 8 brought
+`glob` 13.0.7, and on the merge (2026-11-09 14:23 UTC) GitHub reopened the
+alert with the scope "runtime".
+
+### Paths (`yarn why glob -R`)
+
+- `glob` 13.0.7: only `@electron/asar` 4.3.1 (`^13.0.2`), which
+  `@electron/packager` 20.3 and `@electron/universal` 3.0.6 use; both come
+  with the Forge 8 devDependencies.
+- `glob` 10.5.0: `node-gyp` 11, `cacache` 19 and `rimraf` 5 under the
+  optional `fsevents` build (Tailwind's `chokidar`, Vite). `fsevents` installs
+  on macOS only; it is not in `node_modules` on Windows.
+- `glob` 7.x (eslint, Tailwind, `@electron/asar` 3) is outside the range.
+
+No path starts from a package in `dependencies`; the "runtime" scope does
+not match the lockfile.
+
+### Packaged app
+
+`app.asar` holds only `.vite/` and `package.json` (smoke check 1). No bundle
+in `.vite/build` or `.vite/renderer` contains glob's `GlobWalker` or
+`PathScurry`, or minimatch's `GLOBSTAR`.
+
+### Build
+
+The same kind of trace as for minimatch, wrapping the search methods of
+`Glob` in both builds of glob 13's `index.min.js` (`NODE_OPTIONS=--import`).
+In a control run it recorded `@electron/asar`'s own crawl of `makers/`.
+One `yarn make -p win32` (11 Node processes) ran **one** search:
+`<packager's temporary folder>/resources/app/**/*`, from `@electron/asar`'s
+`crawl`, with no AbortSignal.
+
+- **#139:** the advisory only matters to code that cancels a search with an
+  AbortSignal. `@electron/asar` passes none, so it is not reachable.
+- **#142 (same trace):** glob 13's bundle carries minimatch 10.x (it declares
+  `^10.2.2`, inside #142's range) and always compiles at level 2, so the
+  minimatch code the advisory is about runs once per `yarn make`. Its
+  pattern is the temporary folder packager creates under the system temp
+  directory plus `/**/*`, not input from outside the repository. Dependabot
+  cannot see this inlined copy; #142 covers the same advisory.
+
+### Fix within the declared ranges
+
+None. No `glob` 13.x has the fix and `@electron/asar` 4.3.1 asks for
+`^13.0.2`. Forcing 14.0.2 would need a `resolutions` override outside that
+range, on the packaging path. Not done, as for minimatch 11. #139 stays open
+until `@electron/asar` moves to glob 14.0.2 or later.
+
+### Holds only while
+
+- nothing in the build passes an AbortSignal to glob;
+- the build takes no glob patterns from outside the repository, and the
+  system temp directory is not controlled by someone else.
 
 ## Not claimed
 
@@ -405,5 +475,5 @@ nothing. The alert stays open until its parents move to minimatch 11.
   re-checks the dependency graph against the npm advisory database on the
   date above.
 - Reachability notes are based on reading how each package is used, not on
-  dynamic testing; the exceptions are the two minimatch traces of
-  2026-11-09, one `yarn make -p win32` run each, before and after Forge 8.
+  dynamic testing; the exceptions are the two minimatch traces and the glob
+  trace of 2026-11-09, one `yarn make -p win32` run each.
