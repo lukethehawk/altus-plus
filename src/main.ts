@@ -16,6 +16,7 @@ import {
 } from "electron";
 import fs from "fs";
 import path from "path";
+import { pathToFileURL } from "url";
 import { electronTabStore } from "./stores/tabs/electron";
 import { Tab, TabStore } from "./stores/tabs/common";
 import { electronThemeStore } from "./stores/themes/electron";
@@ -405,7 +406,7 @@ function createWindow() {
     x: rememberWindowPosition ? windowState.get("x") ?? undefined : undefined,
     y: rememberWindowPosition ? windowState.get("y") ?? undefined : undefined,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "preload.cjs"),
       webviewTag: true,
     },
     title: `${APP_NAME} ${app.getVersion()}`,
@@ -428,7 +429,7 @@ function createWindow() {
         event.preventDefault();
         return;
       }
-      webPreferences.preload = path.join(__dirname, "whatsapp.preload.js");
+      webPreferences.preload = path.join(__dirname, "whatsapp.preload.cjs");
       webPreferences.nodeIntegration = false;
       webPreferences.nodeIntegrationInSubFrames = false;
       webPreferences.contextIsolation = true;
@@ -823,8 +824,9 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     });
 
   handle("get-whatsapp-preload-path", () => {
-    // @ts-expect-error ImportMeta works correctly
-    return import.meta.url.replace("main.js", "whatsapp.preload.js");
+    // Vite 8 does not turn import.meta.url into a file URL in the CommonJS
+    // main bundle, so build it from __dirname.
+    return pathToFileURL(path.join(__dirname, "whatsapp.preload.cjs")).href;
   });
 
   handle("settings-store-get", () => {

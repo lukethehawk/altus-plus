@@ -188,11 +188,11 @@ What is left needs major upgrades. None of it ships in the app:
 
 | Package | Alerts | Reachability | Way out |
 |---|---:|---|---|
-| `tar` 6.2.1 (includes the npm critical) | 8 | app-builder-lib 26.0.12 and Forge's native-module rebuild (`@electron/rebuild` 3, node-gyp 9, cacache). The app has no native modules; electron-builder only unpacks its own downloads | A newer app-builder-lib (26.18 uses tar 7; from 26.12 our patch is no longer needed) **and** a newer Forge. **2026-11-09:** app-builder-lib 26.18.1 uses tar 7.5.22; tar 6.2.1 is left only under Forge 7 |
-| `vite` 4.5.14 (12), `esbuild` 0.18.20 (1) | 13 | Dev server only (`yarn start` on the developer's machine); CI and releases run `vite build`. Alert #141 checked in detail in the triage of 2026-11-09 | Forge's Vite plugin with Vite 5 or later |
-| `extract-zip` 2.0.1 | 2 | `@electron/packager` unpacks the Electron zip, downloaded from GitHub and checked against its SHASUMS | No fixed version exists |
+| `tar` 6.2.1 (includes the npm critical) | 8 | app-builder-lib 26.0.12 and Forge's native-module rebuild (`@electron/rebuild` 3, node-gyp 9, cacache). The app has no native modules; electron-builder only unpacks its own downloads | A newer app-builder-lib (26.18 uses tar 7; from 26.12 our patch is no longer needed) **and** a newer Forge. **2026-11-09:** app-builder-lib 26.18.1 uses tar 7.5.22; tar 6.2.1 is left only under Forge 7. **2026-11-09, plus.21:** Forge 8 brings `@electron/rebuild` 4.2.1; tar 6.2.1 is gone from `yarn.lock`, only 7.5.22 is left |
+| `vite` 4.5.14 (12), `esbuild` 0.18.20 (1) | 13 | Dev server only (`yarn start` on the developer's machine); CI and releases run `vite build`. Alert #141 checked in detail in the triage of 2026-11-09 | Forge's Vite plugin with Vite 5 or later. **2026-11-09, plus.21:** Forge 8's Vite plugin with Vite 8.3.7; `vite` 4 and `esbuild` are gone from `yarn.lock` |
+| `extract-zip` 2.0.1 | 2 | `@electron/packager` unpacks the Electron zip, downloaded from GitHub and checked against its SHASUMS | No fixed version exists. **2026-11-09, plus.21:** `@electron/packager` 20.3 (Forge 8) no longer uses it; gone from `yarn.lock` |
 | `app-builder-lib` 26.0.12 (AppImage search path), `builder-util-runtime` 9.3.1 (token leak on redirects) | 2 | AppImage is Linux only; the token issue is in electron-builder's publisher, which we do not use. The shipped updater already uses builder-util-runtime 9.7.0 | app-builder-lib ≥ 26.15. **Fixed 2026-11-09: 26.18.1** (builder-util-runtime 9.7.1) |
-| `minimatch` 9.0.9 / 10.2.6 (≥ 7, < 11.0.1) | 1 | Build tooling; loaded but compiles no pattern in `yarn make` (triage of 2026-11-09) | Upgrading its parents (fixed only in 11.0.1) |
+| `minimatch` 9.0.9 / 10.2.6 (≥ 7, < 11.0.1) | 1 | Build tooling; loaded but compiles no pattern in `yarn make` (triage of 2026-11-09). **With Forge 8:** one fixed pattern at the default level 1 (update for plus.21 below) | Upgrading its parents (fixed only in 11.0.1) |
 | `@babel/core` 7.26.10 (low) | 1 | Follows source-map comments in our own sources while compiling the UI. Left out on purpose: it is the UI compiler | Next Babel update. **Fixed 2026-11-09: 7.29.13**, built UI unchanged |
 
 npm also reports some build-only advisories without an open Dependabot alert
@@ -320,7 +320,7 @@ them new or removed dependencies of electron-builder 26.18; `7zip-bin` and
 
 | | Before | After |
 |---|---:|---:|
-| Open Dependabot alerts | 27 | 24 expected (#80, #92 and #93 close), to be confirmed after GitHub's rescan |
+| Open Dependabot alerts | 27 | 24 (#80, #92 and #93 closed on merge) |
 | `yarn npm audit --all --recursive`, ignore list off (critical / high / moderate / low) | 1 / 14 / 15 / 5 | 1 / 13 / 15 / 4 |
 | Same, production environment, high or critical | 0 | 0 |
 
@@ -330,11 +330,80 @@ still pulled by Forge 7's `@electron/rebuild` 3 (through
 `esbuild`, `extract-zip` (`@electron/packager` 18) and `minimatch` 10.2.6
 (app-builder-lib 26.18.1 still asks for `^10.2.5`).
 
+## Update 2026-11-09 (Forge 8 and Vite 8, 5.8.1-plus.21)
+
+Second step. Base: `master` @ `cad89de` (v5.8.1-plus.20).
+
+| Package (all devDependencies) | Before | After | Why |
+|---|---:|---:|---|
+| `@electron-forge/cli`, `maker-base`, `plugin-vite`, `plugin-fuses` | 7.8.0 (plugin-vite 7.1.0) | 8.0.1 | Brings `@electron/rebuild` 4.2.1 (tar 7) and `@electron/packager` 20.3 (no `extract-zip`) |
+| `vite` | 4.5.14 (through plugin-vite) | 8.3.7, declared | Forge 8's Vite plugin no longer installs Vite; Vite 8 bundles with Rolldown, without esbuild |
+| `vite-plugin-solid` | 2.11.6 | 2.11.15 | Supports Vite 8 |
+| `@electron/fuses` | 1.8.0 | 2.1.3 | Required by plugin-fuses 8; the same fuses are written (smoke check 1) |
+| `@electron-forge/maker-dmg`, `@electron-forge/plugin-auto-unpack-natives` | 7.8.0 | removed | Unused: `makers/MakerDMG.ts` is our own, and packager 20 unpacks `.node` files by default (the app has none) |
+| `fs-extra`, `debug` | through Forge | 10.1.0, 4.3.4, declared | `makers/` imports them; same versions as before, nothing new downloaded |
+
+`yarn.lock`: 1050 → 838 packages (317 removed, 105 added). Forge 8 needs
+Node ≥ 22.13 to build; CI uses the newest Node 22.
+
+Changes the new tools require:
+
+- **Bundles are `.cjs`.** Forge 8 emits `main.cjs`, `preload.cjs` and
+  `whatsapp.preload.cjs`; `package.json` `main` and the two preload paths in
+  `src/main.ts` follow.
+- **The WhatsApp preload URL is built from `__dirname`.** Vite 8 compiles
+  `import.meta.url` in the CommonJS main bundle to `({}).url`, so the old
+  `import.meta.url.replace(...)` would throw and the tabs would start without
+  their preload. It now uses `pathToFileURL(path.join(__dirname, ...))`.
+- **Tray icons and translations are copied again.** Forge 8 builds the main
+  process with `copyPublicDir: false`, which leaves `assets/icons` and
+  `locales` out of `.vite/build`; `vite.main.config.ts` turns it back on.
+  Smoke check 1 now reads the `app.asar` header and fails if any bundle, the
+  window page, an icon or a `translation.json` is missing, or if anything
+  other than `.vite` and `package.json` is inside (tested against a copy with
+  the translations and one icon removed and a `node_modules` folder added:
+  all three reported).
+- ESLint's `import/no-unresolved` ignores the ESM-only `@electron-forge/*`,
+  `@electron/fuses` and `vite`. `resolve.browserField` (removed in Vite 5)
+  and the deprecated `electron-forge publish` are replaced.
+
+**The app is rebuilt by a different bundler**, so unlike plus.20 the files
+are not byte-identical: `main.cjs` 737,513 bytes (`main.js` 753,611 on
+master), the window bundle 317,674 (328,984). The window page keeps its
+Content-Security-Policy. The bundles contain no `import.meta`, and
+`ALTUS_TEST_UPDATE_FEED` is still replaced at build time. Installer: 120.7 MB.
+
+| | Before | After |
+|---|---:|---:|
+| Open Dependabot alerts | 24 | 1 expected (#142), to be confirmed after GitHub's rescan |
+| Alerts whose vulnerable range still matches a version in `yarn.lock` | 24 | 1 (#142: `minimatch` 9.0.9 / 10.2.6) |
+| `yarn npm audit --all --recursive`, ignore list off (critical / high / moderate / low) | 1 / 13 / 15 / 4 | 0 / 0 / 4 / 1 |
+| Same, production environment, high or critical | 0 | 0 |
+
+The second row compares each open alert's vulnerable range with every
+version in each `yarn.lock`. What npm still reports: `glob` 10.5.0 / 13.0.7
+(AbortSignal), `micromatch` 4.0.5 and `yaml` 2.3.2 (Tailwind / PostCSS),
+`minimatch` 9.0.9 / 10.2.6 (#142), `diff` 4.0.2 (ts-node). `image-size` is
+gone with the DMG maker.
+
+**#142 `minimatch`, traced again.** Forge 8 adds two paths to 10.2.6:
+`@electron/asar` 4.3.1 (used by packager 20) and `glob` 13.0.7. The same
+`yarn make -p win32` trace as in the triage, this time wrapping the ESM and
+CommonJS builds of all three copies in range (preloaded with
+`NODE_OPTIONS=--import`; a control run recorded patterns from each copy at
+levels 1 and 2), saw 11 Node processes and 31 compiled patterns, all the
+same: `**/{.**,**}/**/*.node`, level 1, from `@electron/asar`'s
+`shouldUnpackPath`. That is packager 20's built-in default for `asar: true`
+(`createAsarOpts` in `@electron/packager/dist/common.js`), not a pattern
+from outside the repository, and the advisory needs level 2 or more.
+`glob` and the app-builder-lib / `@electron/universal` copies compiled
+nothing. The alert stays open until its parents move to minimatch 11.
+
 ## Not claimed
 
 - This does not prove the shipped app is free of vulnerabilities; it only
   re-checks the dependency graph against the npm advisory database on the
   date above.
 - Reachability notes are based on reading how each package is used, not on
-  dynamic testing; the one exception is the minimatch trace of 2026-11-09,
-  a single `yarn make -p win32` run.
+  dynamic testing; the exceptions are the two minimatch traces of
+  2026-11-09, one `yarn make -p win32` run each, before and after Forge 8.
