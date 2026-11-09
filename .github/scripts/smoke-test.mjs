@@ -3,7 +3,10 @@
 //   node .github/scripts/smoke-test.mjs              checks 1-6 (`yarn smoke`)
 //   node .github/scripts/smoke-test.mjs --installer  checks 1-9
 //
-// 1. fuses baked into the executable;
+// 1. fuses baked into the executable; app.asar holds only the built app,
+//    with the main and preload bundles, the window page, and the tray icons
+//    and translations the main process reads (an English run would not miss
+//    the translations);
 // 2. a modified app.asar is refused at startup;
 // 3. a fresh profile (--user-data-dir) opens the window and a WhatsApp Web tab,
 //    with no errors in the app window;
@@ -353,7 +356,53 @@ async function checkFuses() {
       failures.push(`${fuse} is ${actual === ENABLE ? "on" : actual === DISABLE ? "off" : actual}, expected ${state === ENABLE ? "on" : "off"}`);
     }
   }
+  failures.push(...checkAppFiles());
   return { failures, notes: [] };
+}
+
+// File paths inside app.asar, from its header: a pickled size, then a pickled
+// JSON string ({ files: { name: { files: ... } | { size, ... } } }).
+function asarFiles(asar) {
+  const fd = fs.openSync(asar, "r");
+  try {
+    const head = Buffer.alloc(16);
+    fs.readSync(fd, head, 0, 16, 0);
+    const json = Buffer.alloc(head.readUInt32LE(12));
+    fs.readSync(fd, json, 0, json.length, 16);
+    const files = new Set();
+    const walk = (node, prefix) => {
+      for (const [name, entry] of Object.entries(node.files)) {
+        const file = prefix ? `${prefix}/${name}` : name;
+        if (entry.files) walk(entry, file);
+        else files.add(file);
+      }
+    };
+    walk(JSON.parse(json.toString("utf8")), "");
+    return files;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function checkAppFiles() {
+  const files = asarFiles(path.join(path.dirname(PACKAGED_EXE), "resources", "app.asar"));
+  const build = path.posix.dirname(packageJson.main);
+  const publicFiles = (dir) => fs.readdirSync(path.join(root, "public", dir), { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.relative(path.join(root, "public"), path.join(entry.parentPath, entry.name)).split(path.sep).join("/"));
+  const expected = [
+    "package.json",
+    packageJson.main,
+    `${build}/preload.cjs`,
+    `${build}/whatsapp.preload.cjs`,
+    ".vite/renderer/main_window/index.html",
+    ...publicFiles("assets/icons").map((file) => `${build}/${file}`),
+    ...publicFiles("locales").filter((file) => file.endsWith("/translation.json")).map((file) => `${build}/${file}`),
+  ];
+  const failures = expected.filter((file) => !files.has(file)).map((file) => `app.asar has no ${file}`);
+  const extra = [...new Set([...files].map((file) => file.split("/")[0]))].filter((top) => top !== ".vite" && top !== "package.json");
+  if (extra.length) failures.push(`app.asar also holds ${extra.join(", ")}`);
+  return failures;
 }
 
 async function checkTamperedAsar() {
@@ -1155,7 +1204,7 @@ function findInstaller() {
 // --- main ------------------------------------------------------------------
 
 const checks = [
-  ["1. Fuses", checkFuses],
+  ["1. Fuses; app.asar has the bundles, page, icons and translations", checkFuses],
   ["2. Modified app.asar is refused", checkTamperedAsar],
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand", checkStartInTray],
