@@ -189,10 +189,10 @@ What is left needs major upgrades. None of it ships in the app:
 | Package | Alerts | Reachability | Way out |
 |---|---:|---|---|
 | `tar` 6.2.1 (includes the npm critical) | 8 | app-builder-lib 26.0.12 and Forge's native-module rebuild (`@electron/rebuild` 3, node-gyp 9, cacache). The app has no native modules; electron-builder only unpacks its own downloads | A newer app-builder-lib (26.18 uses tar 7; from 26.12 our patch is no longer needed) **and** a newer Forge |
-| `vite` 4.5.14 (12), `esbuild` 0.18.20 (1) | 13 | Dev server only (`yarn start` on the developer's machine); CI and releases run `vite build` | Forge's Vite plugin with Vite 5 or later |
+| `vite` 4.5.14 (12), `esbuild` 0.18.20 (1) | 13 | Dev server only (`yarn start` on the developer's machine); CI and releases run `vite build`. Alert #141 checked in detail in the triage of 2026-11-09 | Forge's Vite plugin with Vite 5 or later |
 | `extract-zip` 2.0.1 | 2 | `@electron/packager` unpacks the Electron zip, downloaded from GitHub and checked against its SHASUMS | No fixed version exists |
 | `app-builder-lib` 26.0.12 (AppImage search path), `builder-util-runtime` 9.3.1 (token leak on redirects) | 2 | AppImage is Linux only; the token issue is in electron-builder's publisher, which we do not use. The shipped updater already uses builder-util-runtime 9.7.0 | app-builder-lib ≥ 26.15 |
-| `minimatch` (< 11.0.1) | 1 | Build tooling; fixed only in a new major | Upgrading its parents |
+| `minimatch` 9.0.9 / 10.2.6 (≥ 7, < 11.0.1) | 1 | Build tooling; loaded but compiles no pattern in `yarn make` (triage of 2026-11-09) | Upgrading its parents (fixed only in 11.0.1) |
 | `@babel/core` 7.26.10 (low) | 1 | Follows source-map comments in our own sources while compiling the UI. Left out on purpose: it is the UI compiler | Next Babel update |
 
 npm also reports some build-only advisories without an open Dependabot alert
@@ -202,10 +202,100 @@ PostCSS), `glob` 10.5.0 (only matters to code that cancels a search with an
 AbortSignal),
 `diff` 4.0.2 (ts-node).
 
+## Triage 2026-11-09 (Dependabot alerts #141 and #142)
+
+Two medium alerts opened after the re-run of 2026-11-04 (27 alerts are open,
+these two included). Dependabot files both under "development"; this section
+checks that against `yarn.lock`, the packaged app and the build. Base:
+`master` @ `e851ab2` (v5.8.1-plus.19 plus a README change).
+
+| Alert | Advisory | Affected | Locked (in range) | First fix |
+|---|---|---|---|---|
+| #141 `vite` | GHSA-93m4-6634-74q7 (CVE-2025-62522): files in `server.fs.deny` are served when the URL ends with a backslash | ≥ 4.5.3, < 5.0.0 | 4.5.14 | 5.4.21 |
+| #142 `minimatch` | GHSA-g3hv-75wg-m249 (CVE-2026-118764): CPU and memory blow-up from an attacker-supplied pattern | ≥ 7.0.0, < 11.0.1 | 9.0.9, 10.2.6 | 11.0.1 |
+
+### Paths (`yarn why <pkg> -R`)
+
+- `vite` 4.5.14: the only copy, via `@electron-forge/plugin-vite` 7.1.0
+  (`^4.1.1`). The update of 2026-11-04 moved it from 4.5.2, which is below
+  this advisory's range.
+- `minimatch` 10.2.6: `app-builder-lib` 26.0.12 (`^10.0.0`).
+- `minimatch` 9.0.9: `@electron/universal` 2.0.1 / 2.0.2 (via app-builder-lib
+  and `@electron/packager`) and `glob` 10.5.0 (via `config-file-ts`,
+  `node-gyp` 11, `cacache` 17 / 19, `rimraf` 5).
+- `minimatch` 3.1.5 (eslint, Tailwind, asar, …) and 5.1.9 are outside the
+  range.
+
+### Packaged app
+
+`app.asar` from `yarn package -p win32` holds only `.vite/` and
+`package.json`, identical to the local `.vite/`. Searched in
+`.vite/build/*.js` and `.vite/renderer/main_window/assets/*.js`:
+
+- minimatch: no `minimatch`, `optimizationLevel`, `globParts`, `GLOBSTAR` or
+  `windowsPathsNoEscape`.
+- Vite dev server: no `fs.deny`, `isFileServingAllowed`, `allowedHosts`,
+  `@vite/client` or `import.meta.hot`. The only Vite code is its
+  `modulepreload` polyfill in the renderer bundle. The main process loads the
+  window with `loadFile`; the `MAIN_WINDOW_VITE_DEV_SERVER_URL` branch is
+  compiled out.
+
+Neither package ships in the app.
+
+### Build and development
+
+- **#141 `vite`:** the advisory needs the dev server running on Windows
+  **and** exposed to the network (`--host` or `server.host`). The dev server
+  only runs under `yarn start`; CI and releases run `yarn make` (`vite build`,
+  no server). `vite.renderer.config.ts` sets no `server`, Forge passes that
+  config to `createServer` unchanged, and Vite 4.5.14 then listens on
+  `localhost` only. 4.5.14 also checks the `Host` header (`allowedHosts`), so
+  a web page cannot reach the dev server through DNS rebinding. The
+  repository tracks no `.env`, `.pem` or `.crt` file, the patterns
+  `server.fs.deny` protects by default.
+- **#142 `minimatch`:** the advisory needs an attacker-supplied pattern
+  compiled with `optimizationLevel` 2 or more (the default is 1).
+  app-builder-lib's file matcher and `@electron/universal` use the default;
+  `glob` 10 sets 2. All patterns come from our own configuration or from the
+  tools' own code. A `yarn make -p win32` run with a preloaded hook that
+  records every pattern compiled by minimatch ≥ 7 (`NODE_OPTIONS=--require`,
+  wrapping `Minimatch.prototype.preprocess`) found 9.0.9 and 10.2.6 **loaded
+  but never used**: electron-builder works on the app Forge has already
+  packaged and reads its configuration from `package.json`, so neither its
+  file matcher nor `config-file-ts` / `glob` run. A control run through the
+  same copies recorded level 1 (app-builder-lib) and level 2 (glob) as
+  expected. Not traced: `yarn install`, `yarn start`, `yarn lint` (eslint
+  uses 3.1.5).
+
+### Fix within the declared ranges
+
+None. `vite` 4.5.14 (2025-04-30) is the newest 4.x; `minimatch` 9.0.9 and
+10.2.6 are the newest of their majors, so `yarn up -R minimatch` changes
+nothing. Not done: a `resolutions` override to minimatch 11 (outside the
+ranges its parents declare, on the installer build path) and Vite 5 (needs a
+newer Forge Vite plugin). Both alerts stay open and should close when those
+parents are upgraded.
+
+### Audit
+
+`YARN_NPM_AUDIT_IGNORE_ADVISORIES=0 yarn npm audit --all --recursive`:
+1 critical / 14 high / 15 moderate / 5 low advisories, the same as after the
+update of 2026-11-04; both advisories above are still reported. The output
+also lists 18 "moderate" deprecation notices (no advisory URL), not counted
+here. Production environment, high or critical: none. Nothing was added to
+`npmAuditIgnoreAdvisories`: both advisories are moderate and fail no check.
+
+### Holds only while
+
+- nobody runs the dev server with `--host` (or adds `server.host`);
+- the build takes no glob patterns from outside the repository;
+- electron-builder keeps building from Forge's prepackaged app.
+
 ## Not claimed
 
 - This does not prove the shipped app is free of vulnerabilities; it only
   re-checks the dependency graph against the npm advisory database on the
   date above.
 - Reachability notes are based on reading how each package is used, not on
-  dynamic testing.
+  dynamic testing; the one exception is the minimatch trace of 2026-11-09,
+  a single `yarn make -p win32` run.
