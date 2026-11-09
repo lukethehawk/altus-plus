@@ -188,12 +188,12 @@ What is left needs major upgrades. None of it ships in the app:
 
 | Package | Alerts | Reachability | Way out |
 |---|---:|---|---|
-| `tar` 6.2.1 (includes the npm critical) | 8 | app-builder-lib 26.0.12 and Forge's native-module rebuild (`@electron/rebuild` 3, node-gyp 9, cacache). The app has no native modules; electron-builder only unpacks its own downloads | A newer app-builder-lib (26.18 uses tar 7; from 26.12 our patch is no longer needed) **and** a newer Forge |
+| `tar` 6.2.1 (includes the npm critical) | 8 | app-builder-lib 26.0.12 and Forge's native-module rebuild (`@electron/rebuild` 3, node-gyp 9, cacache). The app has no native modules; electron-builder only unpacks its own downloads | A newer app-builder-lib (26.18 uses tar 7; from 26.12 our patch is no longer needed) **and** a newer Forge. **2026-11-09:** app-builder-lib 26.18.1 uses tar 7.5.22; tar 6.2.1 is left only under Forge 7 |
 | `vite` 4.5.14 (12), `esbuild` 0.18.20 (1) | 13 | Dev server only (`yarn start` on the developer's machine); CI and releases run `vite build`. Alert #141 checked in detail in the triage of 2026-11-09 | Forge's Vite plugin with Vite 5 or later |
 | `extract-zip` 2.0.1 | 2 | `@electron/packager` unpacks the Electron zip, downloaded from GitHub and checked against its SHASUMS | No fixed version exists |
-| `app-builder-lib` 26.0.12 (AppImage search path), `builder-util-runtime` 9.3.1 (token leak on redirects) | 2 | AppImage is Linux only; the token issue is in electron-builder's publisher, which we do not use. The shipped updater already uses builder-util-runtime 9.7.0 | app-builder-lib ≥ 26.15 |
+| `app-builder-lib` 26.0.12 (AppImage search path), `builder-util-runtime` 9.3.1 (token leak on redirects) | 2 | AppImage is Linux only; the token issue is in electron-builder's publisher, which we do not use. The shipped updater already uses builder-util-runtime 9.7.0 | app-builder-lib ≥ 26.15. **Fixed 2026-11-09: 26.18.1** (builder-util-runtime 9.7.1) |
 | `minimatch` 9.0.9 / 10.2.6 (≥ 7, < 11.0.1) | 1 | Build tooling; loaded but compiles no pattern in `yarn make` (triage of 2026-11-09) | Upgrading its parents (fixed only in 11.0.1) |
-| `@babel/core` 7.26.10 (low) | 1 | Follows source-map comments in our own sources while compiling the UI. Left out on purpose: it is the UI compiler | Next Babel update |
+| `@babel/core` 7.26.10 (low) | 1 | Follows source-map comments in our own sources while compiling the UI. Left out on purpose: it is the UI compiler | Next Babel update. **Fixed 2026-11-09: 7.29.13**, built UI unchanged |
 
 npm also reports some build-only advisories without an open Dependabot alert
 (GitHub auto-dismissed them as development only): `image-size` 0.7.5
@@ -290,6 +290,45 @@ here. Production environment, high or critical: none. Nothing was added to
 - nobody runs the dev server with `--host` (or adds `server.host`);
 - the build takes no glob patterns from outside the repository;
 - electron-builder keeps building from Forge's prepackaged app.
+
+## Update 2026-11-09 (electron-builder 26.18.1, 5.8.1-plus.20)
+
+First of two steps against the alerts left above; the second, Forge 8 with
+Vite 8, is planned separately. Base: `master` @ `6a3fd85`.
+
+| Package | Before | After | Why |
+|---|---:|---:|---|
+| `app-builder-lib` (devDependency, builds the installer) | 26.0.12 + our patch | 26.18.1 | Alerts #92 and #93 |
+| `dmg-builder` | 26.0.12 | 26.18.1 | Peer of app-builder-lib; macOS only, never built |
+| `builder-util-runtime` (build copy) | 9.3.1 | 9.7.1 | Comes with app-builder-lib |
+| `@electron/get` 3.x | 3.0.0 | 3.1.0 | app-builder-lib 26.18 declares `^3.0.0` but reads `ElectronDownloadCacheMode`, added in 3.1.0; with 3.0.0 `yarn make` stops with "Cannot read properties of undefined (reading 'ReadWrite')" |
+| `@babel/core` | 7.26.10 | 7.29.13 | Alert #80, within the declared range |
+
+`yarn.lock` changes only in these packages' own trees (83 entries, most of
+them new or removed dependencies of electron-builder 26.18; `7zip-bin` and
+`app-builder-bin` are gone).
+
+- **The NSIS patch is removed.** `templates/nsis/multiUser.nsh` in 26.18.1
+  has the same per-user Programs path code as our patch;
+  `tests/installer.test.mjs` keeps checking it.
+- **The app does not change.** `.vite/` built from this branch is
+  byte-identical to `master`'s, Babel included. The shipped updater keeps
+  `electron-updater` 6.8.11 with `builder-util-runtime` 9.7.0.
+- **The installer is bigger:** about 120.9 MB in a local build instead of
+  115.0 MB for plus.19, so the first update to it downloads the whole file
+  rather than a difference.
+
+| | Before | After |
+|---|---:|---:|
+| Open Dependabot alerts | 27 | 24 expected (#80, #92 and #93 close), to be confirmed after GitHub's rescan |
+| `yarn npm audit --all --recursive`, ignore list off (critical / high / moderate / low) | 1 / 14 / 15 / 5 | 1 / 13 / 15 / 4 |
+| Same, production environment, high or critical | 0 | 0 |
+
+The npm critical and the other `tar` 6.2.1 advisories stay: tar 6.2.1 is
+still pulled by Forge 7's `@electron/rebuild` 3 (through
+`@electron/node-gyp`, node-gyp 9 and cacache 16/17). So do `vite` /
+`esbuild`, `extract-zip` (`@electron/packager` 18) and `minimatch` 10.2.6
+(app-builder-lib 26.18.1 still asks for `^10.2.5`).
 
 ## Not claimed
 

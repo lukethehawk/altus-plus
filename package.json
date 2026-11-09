@@ -1,7 +1,7 @@
 {
   "name": "altus-plus",
   "productName": "Altus +",
-  "version": "5.8.1-plus.19",
+  "version": "5.8.1-plus.20",
   "description": "Altus +: multi-account WhatsApp Web desktop app for Windows, a maintained fork of Altus.",
   "homepage": "https://github.com/lukethehawk/altus-plus",
   "repository": {
@@ -52,9 +52,9 @@
     "@types/auto-launch": "^5.0.3",
     "@typescript-eslint/eslint-plugin": "^5.0.0",
     "@typescript-eslint/parser": "^5.0.0",
-    "app-builder-lib": "patch:app-builder-lib@npm%3A26.0.12#~/.yarn/patches/app-builder-lib-npm-26.0.12-30c9e1508c.patch",
+    "app-builder-lib": "26.18.1",
     "autoprefixer": "^10.4.15",
-    "dmg-builder": "^26.0.12",
+    "dmg-builder": "26.18.1",
     "electron": "44.10.1",
     "eslint": "^8.0.1",
     "eslint-plugin-import": "^2.31.0",
@@ -79,8 +79,5 @@
     "tailwind-merge": "^3.2.0",
     "zod": "4.6.6"
   },
-  "packageManager": "yarn@4.9.0",
-  "resolutions": {
-    "app-builder-lib@npm:26.0.12": "patch:app-builder-lib@npm%3A26.0.12#~/.yarn/patches/app-builder-lib-npm-26.0.12-30c9e1508c.patch"
-  }
+  "packageManager": "yarn@4.9.0"
 }
