@@ -95,6 +95,7 @@ Nelle schede Altus + carica solo WhatsApp Web. L'unica altra connessione è vers
 | **Integrità** | All'avvio l'app controlla il proprio pacchetto (`app.asar`) e si rifiuta di partire se è stato modificato. |
 | **Aggiornamenti** | Scaricati solo dalle release di questo repository e installati solo se lo SHA512 corrisponde. |
 | **Dipendenze** | Un audit settimanale fallisce su nuovi avvisi high o critical nelle dipendenze dell'app e su qualsiasi avviso relativo a Electron; Dependabot propone le correzioni di sicurezza. Un controllo settimanale segnala ogni nuova release di Electron, che porta le correzioni di sicurezza di Chromium, e la fine del supporto della versione di Electron in uso. Gli avvisi noti, e perché non riguardano l'app, sono in [`docs/DEPENDENCY-AUDIT-ELECTRON44.md`](docs/DEPENDENCY-AUDIT-ELECTRON44.md). |
+| **Analisi del codice** | GitHub CodeQL controlla il codice dell'app e i workflow di build in cerca di problemi di sicurezza a ogni pull request, su `master` e ogni settimana; i risultati compaiono in Security → Code scanning. |
 
 Non ancora fatto: l'installer non è firmato digitalmente e i cookie di sessione sono salvati come fa Chromium di default (non cifrati). Hai trovato un problema di sicurezza? Segnalalo con un [avviso di sicurezza privato](https://github.com/lukethehawk/altus-plus/security/advisories/new) invece che con una issue pubblica.
 
