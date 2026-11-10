@@ -5,12 +5,15 @@ import { FuseV1Options, FuseVersion } from "@electron/fuses";
 import MakerAppImage from "./makers/MakerAppImage";
 import MakerNSIS from "./makers/MakerNSIS";
 import MakerDMG from "./makers/MakerDMG";
+import { COPYRIGHT } from "./makers/CommonConfig";
 
 const config: ForgeConfig = {
   packagerConfig: {
     icon: "./public/assets/icons/icon",
     appBundleId: "com.lukethehawk.altusplus",
     appCategoryType: "public.app-category.social-networking",
+    // The exe's copyright line; without it, it keeps Electron's own.
+    appCopyright: COPYRIGHT,
     // No whatsapp:// protocol registration, so official Altus keeps it.
     asar: true,
     // The Vite bundles in .vite/ inline every runtime dependency; this

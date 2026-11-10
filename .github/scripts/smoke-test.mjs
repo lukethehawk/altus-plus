@@ -26,8 +26,11 @@
 // 7. the installer replaces a fake original Altus (/S --replace-altus), the
 //    installed app opens its tabs and settings and registers autostart; on
 //    the next start it leaves the entry alone (no reg.exe), and writes it
-//    again once deleted;
-// 8. reinstalling never migrates again or touches the Altus + profile;
+//    again once deleted; Windows' installed programs list shows the version
+//    and lukethehawk as publisher (with the original's publisher, WinGet and
+//    UniGetUI offered the original's updates as updates of Altus +);
+// 8. reinstalling never migrates again or touches the Altus + profile, and
+//    leaves one entry in the installed programs list;
 // 9. uninstalling removes the program and keeps the profile.
 //
 // Checks 7-9 install Altus +, write %APPDATA% and uninstall, so they only run
@@ -1056,6 +1059,45 @@ function removeRunEntry(name) {
   return new Promise((resolve, reject) => runKey().key.remove(name, (error) => (error ? reject(error) : resolve())));
 }
 
+/** Values of every program in HKCU's installed programs list (Settings → Apps). */
+async function installedPrograms() {
+  const Winreg = createRequire(import.meta.url)(path.join(root, "node_modules", "winreg"));
+  const list = new Winreg({ hive: Winreg.HKCU, key: "\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall" });
+  const keys = await new Promise((resolve, reject) => list.keys((error, found) => (error ? reject(error) : resolve(found))));
+  return Promise.all(keys.map((key) => new Promise((resolve) => {
+    key.values((error, items) => resolve(error ? {} : Object.fromEntries(items.map((item) => [item.name, item.value]))));
+  })));
+}
+
+// Publisher of the original Altus in its WinGet manifest (AmanHarwara.Altus).
+const ORIGINAL_PUBLISHER = "Aman Harwara";
+
+/**
+ * Altus +'s entry in the installed programs list, which WinGet and UniGetUI
+ * read. WinGet treats an installed program as one of its packages when name
+ * and publisher match once normalized (case, spaces, symbols and versions
+ * dropped, so "Altus + 5.8.1-plus.22" becomes "altus"): with the original's
+ * publisher, UniGetUI offered the original's updates as updates of Altus +.
+ */
+async function checkProgramsEntry() {
+  const entries = (await installedPrograms()).filter((values) => values.DisplayName?.startsWith(packageJson.productName));
+  if (entries.length !== 1) {
+    return [`expected one "${packageJson.productName}" entry in the installed programs list, found ${entries.length}`];
+  }
+  const [entry] = entries;
+  const failures = [];
+  const normalize = (value) => String(value ?? "").replace(/[^\p{L}\p{Nd}]/gu, "").toLowerCase();
+  if (normalize(entry.Publisher) === normalize(ORIGINAL_PUBLISHER)) {
+    failures.push(`installed programs list: the publisher is the original's ('${entry.Publisher}'), so WinGet takes Altus + for it`);
+  } else if (entry.Publisher !== packageJson.author.name) {
+    failures.push(`installed programs list: publisher '${entry.Publisher}', expected '${packageJson.author.name}'`);
+  }
+  if (entry.DisplayVersion !== packageJson.version) {
+    failures.push(`installed programs list: version '${entry.DisplayVersion}', expected '${packageJson.version}'`);
+  }
+  return failures;
+}
+
 /**
  * Two more starts of the installed app once its autostart entry is set: the
  * first leaves the entry alone without running reg.exe; after the entry is
@@ -1151,6 +1193,7 @@ async function checkInstallReplacingOriginal() {
     saveArtifact("installed-app.log", result.output ?? "");
   }
   if (!result.failures.length) result.failures.push(...(await checkAutostartOnRestarts(expectedEntry)));
+  result.failures.push(...(await checkProgramsEntry()));
   return result;
 }
 
@@ -1171,6 +1214,7 @@ async function checkReinstall() {
   }
   if (!fs.existsSync(path.join(APPDATA, "Altus", "tabs.json"))) failures.push("%APPDATA%\\Altus was moved or changed");
   if (backups().length !== 1) failures.push(`a reinstall created another backup (${backups().length} now)`);
+  failures.push(...(await checkProgramsEntry()));
   return { failures, notes: [] };
 }
 

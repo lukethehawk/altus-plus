@@ -1,7 +1,7 @@
 {
   "name": "altus-plus",
   "productName": "Altus +",
-  "version": "5.8.1-plus.21",
+  "version": "5.8.1-plus.22",
   "description": "Altus +: multi-account WhatsApp Web desktop app for Windows, a maintained fork of Altus.",
   "homepage": "https://github.com/lukethehawk/altus-plus",
   "repository": {
@@ -31,13 +31,14 @@
     "whatsapp themes"
   ],
   "author": {
-    "name": "Aman Harwara",
-    "email": "amanharwara@protonmail.com"
+    "name": "lukethehawk",
+    "url": "https://github.com/lukethehawk"
   },
   "contributors": [
     {
-      "name": "lukethehawk",
-      "url": "https://github.com/lukethehawk"
+      "name": "Aman Harwara",
+      "email": "amanharwara@protonmail.com",
+      "url": "https://github.com/amanharwara/altus"
     }
   ],
   "license": "GPL-3.0",
