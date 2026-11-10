@@ -9,7 +9,9 @@
 //    the translations);
 // 2. a modified app.asar is refused at startup;
 // 3. a fresh profile (--user-data-dir) opens the window and a WhatsApp Web tab,
-//    with no errors in the app window;
+//    with no errors in the app window; started by a whatsapp:// link, its
+//    only account opens the chat (and a run on its own profile never
+//    registers the app for the links);
 // 4. "Start in tray with Windows": started with the autostart flag the window
 //    stays hidden while the tab still loads; started by hand it opens;
 // 5. tabs in the background, also with the whole app in the tray, keep
@@ -17,6 +19,8 @@
 //    with their account, and a muted account's notification is suppressed.
 //    Tabs move by dragging only once "Allow Moving Tabs" is on, and
 //    Help → Resource Usage lists every account and recognises every process.
+//    A whatsapp:// link reaching the running app asks which account opens it
+//    (Cancel opens nothing; a link that is not a chat or invite is ignored).
 //    It plays a near-silent tone and shows a silent notification for a moment;
 // 6. Help → Run Resource Test restarts the app into the test, which records
 //    the three accounts into a CSV file; Help → End Resource Test writes the
@@ -29,9 +33,14 @@
 //    again once deleted; Windows' installed programs list shows the version
 //    and lukethehawk as publisher (with the original's publisher, WinGet and
 //    UniGetUI offered the original's updates as updates of Altus +);
+//    with "Open whatsapp:// links" on, the app registers for the links, a
+//    link started through Windows asks which account opens it, and turning
+//    the setting off removes the registration;
 // 8. reinstalling never migrates again or touches the Altus + profile, and
-//    leaves one entry in the installed programs list;
-// 9. uninstalling removes the program and keeps the profile.
+//    leaves one entry in the installed programs list and the link
+//    registration;
+// 9. uninstalling removes the program and its link registration and keeps
+//    the profile.
 //
 // Checks 7-9 install Altus +, write %APPDATA% and uninstall, so they only run
 // on a GitHub-hosted runner, which is discarded afterwards. The app is
@@ -441,6 +450,124 @@ async function checkTamperedAsar() {
 
 const removeTemp = (dir) => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 1000 });
 
+// --- whatsapp:// links (checks 3, 5 and 7) ----------------------------------
+
+// Links as a website's "Chat on WhatsApp" button and a group invite start
+// them, and the WhatsApp Web addresses the app must open for them.
+const CHAT_LINK = {
+  link: "whatsapp://send/?phone=390000000001&text=Prova%20smoke&type=phone_number&app_absent=0",
+  address: "https://web.whatsapp.com/send?phone=390000000001&text=Prova+smoke",
+  shown: "+390000000001",
+};
+const INVITE_LINK = {
+  link: "whatsapp://chat/?code=SmokeInvite0000000001",
+  address: "https://web.whatsapp.com/accept?code=SmokeInvite0000000001",
+};
+// Not a chat or an invite: ignored.
+const BAD_LINK = "whatsapp://send?phone=javascript:alert(1)";
+
+/** The command Windows runs for whatsapp:// links, or null. */
+function readProtocolCommand() {
+  const Winreg = createRequire(import.meta.url)(path.join(root, "node_modules", "winreg"));
+  const key = new Winreg({ hive: Winreg.HKCU, key: "\\Software\\Classes\\whatsapp\\shell\\open\\command" });
+  return new Promise((resolve) => key.get(Winreg.DEFAULT_VALUE, (error, item) => resolve(error ? null : item.value)));
+}
+
+/** The dialog asking which account opens a link, or null when it is not shown. */
+function linkDialog(cdp, tabIds) {
+  return cdp.evaluate(`(() => {
+    const dialog = document.querySelector("[data-whatsapp-link-dialog]");
+    if (!dialog) return null;
+    const ids = ${JSON.stringify(tabIds)};
+    return {
+      text: dialog.textContent,
+      accounts: [...dialog.querySelectorAll("button[data-tab-id]")].map((button) => button.dataset.tabId),
+      focused: document.activeElement?.dataset?.tabId ?? null,
+      selected: ids.find((id) => document.getElementById(id)?.getAttribute("aria-selected") === "true") ?? null,
+    };
+  })()`);
+}
+
+/** What the app last opened in a tab from a link (src follows redirects). */
+const openedLink = (cdp, tabId) =>
+  cdp.evaluate(`document.getElementById(${JSON.stringify(`webview-${tabId}`)})?.dataset.openedLink ?? null`);
+
+/** Clicks the dialog's button for an account, or Cancel (null). */
+const answerLinkDialog = (cdp, tabId) =>
+  cdp.evaluate(`document.querySelector(${JSON.stringify(
+    tabId ? `[data-whatsapp-link-dialog] button[data-tab-id="${tabId}"]` : "[data-whatsapp-link-dialog] [data-cancel]",
+  )}).click()`);
+
+/**
+ * Asks with a link, then answers for `choose` (a tab) and checks that only it
+ * opened the link and is selected. Returns failure messages.
+ */
+async function chooseAccountForLink(cdp, tabs, choose, link) {
+  const failures = [];
+  const ids = tabs.map((tab) => tab.id);
+  const shown = await waitFor("the dialog asking which account opens the link", 30_000, () => linkDialog(cdp, ids));
+  if (!sameJson([...shown.accounts].sort(), [...ids].sort())) {
+    failures.push(`the link dialog offers ${shown.accounts.join(", ")} instead of every account`);
+  }
+  if (link.shown && !shown.text.includes(link.shown)) failures.push(`the link dialog does not show ${link.shown}`);
+  const focus = await waitFor("the selected account to have the focus", 5_000, async () => {
+    const state = await linkDialog(cdp, ids);
+    return state?.focused ? state : null;
+  }).catch(() => shown);
+  if (focus.focused !== focus.selected) {
+    failures.push(`the link dialog's focus is on ${focus.focused}, not on the selected account ${focus.selected}`);
+  }
+  await answerLinkDialog(cdp, choose.id);
+  try {
+    await waitFor(`${choose.name} to open the link`, 10_000, async () => (await openedLink(cdp, choose.id)) === link.address);
+    await waitFor(`${choose.name} to be selected`, 10_000, () =>
+      cdp.evaluate(`document.getElementById(${JSON.stringify(choose.id)}).getAttribute("aria-selected") === "true"`));
+  } catch (error) {
+    failures.push(error.message);
+  }
+  if (await linkDialog(cdp, ids)) failures.push("the link dialog stayed open after choosing an account");
+  for (const tab of tabs) {
+    if (tab !== choose && (await openedLink(cdp, tab.id)) === link.address) failures.push(`${tab.name} opened the link too`);
+  }
+  return failures;
+}
+
+/**
+ * Started by a whatsapp:// link, as Windows starts it ("<exe>" -- "<link>"),
+ * the only account opens the chat without asking. The run's own
+ * --user-data-dir keeps the app from registering itself for the links.
+ */
+async function checkLinkAtStart() {
+  const failures = [];
+  const profile = fs.mkdtempSync(path.join(TEMP, "as-p-"));
+  const port = 9417;
+  const before = await readProtocolCommand();
+  // Chromium reads no switches after "--": the port goes before it.
+  const app = launch(PACKAGED_EXE, [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, "--", CHAT_LINK.link]);
+  let cdp;
+  try {
+    const page = await waitFor("the app window", 90_000, async () => {
+      if (app.exited) throw new Error(`the app exited (code ${app.exitCode})`);
+      return (await targets(port)).find((target) => target.type === "page" && target.url.startsWith("file:"));
+    });
+    cdp = await Cdp.connect(page.webSocketDebuggerUrl);
+    const tab = await waitFor("the tab", 60_000, () =>
+      cdp.evaluate(`document.querySelector("webview")?.id.replace(/^webview-/, "") ?? null`));
+    await waitFor("the link to open in the only account", 30_000, async () => (await openedLink(cdp, tab)) === CHAT_LINK.address);
+    if (await linkDialog(cdp, [tab])) failures.push("with a single account, the app still asked which one opens the link");
+  } catch (error) {
+    failures.push(`started by a link: ${error.message}`);
+  } finally {
+    cdp?.close();
+    await stop(app).catch((error) => failures.push(error.message));
+    if (failures.length) saveArtifact("link-at-start.log", app.output);
+  }
+  const after = await readProtocolCommand();
+  if (after !== before) failures.push(`a run on its own profile changed the whatsapp:// registration to ${after ?? "none"}`);
+  removeTemp(profile);
+  return failures;
+}
+
 async function checkFreshProfile() {
   const realProfile = path.join(APPDATA, PROFILE_FOLDER);
   const realProfileExisted = fs.existsSync(realProfile);
@@ -457,6 +584,7 @@ async function checkFreshProfile() {
     result.failures.push(`--user-data-dir was ignored: ${realProfile} was created`);
   }
   removeTemp(profile);
+  result.failures.push(...(await checkLinkAtStart()));
   return result;
 }
 
@@ -762,6 +890,7 @@ function exerciseBackgroundTabs(run, audio, profile) {
 
         await checkMovingTabs(cdp, profile, failures);
         await checkResourcePanel(cdp, failures, notes);
+        await checkLinkChooser(cdp, profile, failures);
       }
     } catch (error) {
       failures.push(error.message);
@@ -772,6 +901,41 @@ function exerciseBackgroundTabs(run, audio, profile) {
       }
     }
   };
+}
+
+/**
+ * A link reaching the running app through a second start (as Windows makes
+ * it) asks which account opens it, and only the chosen one does. Cancel opens
+ * nothing; a link that is not a chat or an invite does not even ask.
+ */
+async function checkLinkChooser(cdp, profile, failures) {
+  const secondStart = async (link) => {
+    const second = launch(PACKAGED_EXE, [`--user-data-dir=${profile}`, "--", link]);
+    try {
+      await waitFor("the second start to pass the link on and exit", 30_000, () => second.exited);
+    } finally {
+      if (!second.exited) await stop(second);
+    }
+  };
+  const ids = BACKGROUND_TABS.map((tab) => tab.id);
+  try {
+    await secondStart(CHAT_LINK.link);
+    failures.push(...(await chooseAccountForLink(cdp, BACKGROUND_TABS, GAMMA, CHAT_LINK)));
+
+    await secondStart(INVITE_LINK.link);
+    await waitFor("the dialog for the group invite", 30_000, () => linkDialog(cdp, ids));
+    await answerLinkDialog(cdp, null);
+    await waitFor("the dialog to close on Cancel", 5_000, async () => !(await linkDialog(cdp, ids)));
+    for (const tab of BACKGROUND_TABS) {
+      if ((await openedLink(cdp, tab.id)) === INVITE_LINK.address) failures.push(`${tab.name} opened a cancelled link`);
+    }
+
+    await secondStart(BAD_LINK);
+    await sleep(3000);
+    if (await linkDialog(cdp, ids)) failures.push("a link that is not a chat or an invite asked for an account");
+  } catch (error) {
+    failures.push(`whatsapp:// link: ${error.message}`);
+  }
 }
 
 async function checkBackgroundTabs() {
@@ -1098,6 +1262,57 @@ async function checkProgramsEntry() {
   return failures;
 }
 
+/** The command the installed app registers for whatsapp:// links. */
+const installedLinkCommand = () => `"${install.exe}" -- "%1"`;
+const isInstalledLinkCommand = (command) => command?.toLowerCase() === installedLinkCommand().toLowerCase();
+
+/**
+ * Settings → "Open whatsapp:// links" on the installed app: on, the app
+ * registers for the links, and a link started through Windows (as a browser
+ * does) asks which account opens it; off, the registration goes. It is left
+ * on for checks 8 (kept on reinstall) and 9 (removed on uninstall).
+ */
+async function checkLinkRegistration() {
+  const failures = [];
+  const before = await readProtocolCommand();
+  if (before) return [`a whatsapp:// registration exists before the check: ${before}`];
+  const settingsFile = path.join(APPDATA, PROFILE_FOLDER, "settings.json");
+  fs.writeFileSync(settingsFile, JSON.stringify({ ...readJson(settingsFile), registerProtocol: { value: true } }, null, 2));
+  const port = 9418;
+  const app = launch(install.exe, [`--remote-debugging-port=${port}`]);
+  let cdp;
+  try {
+    const page = await waitFor("the installed app window", 90_000, async () => {
+      if (app.exited) throw new Error(`the app exited (code ${app.exitCode})`);
+      return (await targets(port)).find((target) => target.type === "page" && target.url.startsWith("file:"));
+    });
+    cdp = await Cdp.connect(page.webSocketDebuggerUrl);
+    await waitFor("the app to register for whatsapp:// links", 30_000, async () => isInstalledLinkCommand(await readProtocolCommand()))
+      .catch(async (error) => {
+        throw new Error(`${error.message}; the command is ${(await readProtocolCommand()) ?? "missing"}`);
+      });
+
+    // Through Windows, which runs the registered command, as a browser does.
+    const started = spawnSync("powershell.exe", ["-NoProfile", "-Command", `Start-Process '${CHAT_LINK.link}'`], { timeout: 60_000 });
+    if (started.status !== 0) failures.push(`Start-Process of the link exited with ${started.status ?? started.error}`);
+    const tabs = ORIGINAL_TABS.map((tab) => ({ id: tab.id, name: tab.name }));
+    failures.push(...(await chooseAccountForLink(cdp, tabs, tabs[1], CHAT_LINK)));
+
+    // Turned off and on again from the app, as the Settings switch does.
+    await cdp.evaluate(`window.electronSettingsStore.setSetting("registerProtocol", false)`);
+    await waitFor("the registration to be removed when the setting is off", 15_000, async () => !(await readProtocolCommand()));
+    await cdp.evaluate(`window.electronSettingsStore.setSetting("registerProtocol", true)`);
+    await waitFor("the registration to return when the setting is on", 15_000, async () => isInstalledLinkCommand(await readProtocolCommand()));
+  } catch (error) {
+    failures.push(`whatsapp:// links: ${error.message}`);
+  } finally {
+    cdp?.close();
+    await stop(app).catch((error) => failures.push(error.message));
+    if (failures.length) saveArtifact("installed-app-links.log", app.output);
+  }
+  return failures;
+}
+
 /**
  * Two more starts of the installed app once its autostart entry is set: the
  * first leaves the entry alone without running reg.exe; after the entry is
@@ -1194,6 +1409,7 @@ async function checkInstallReplacingOriginal() {
   }
   if (!result.failures.length) result.failures.push(...(await checkAutostartOnRestarts(expectedEntry)));
   result.failures.push(...(await checkProgramsEntry()));
+  result.failures.push(...(await checkLinkRegistration()));
   return result;
 }
 
@@ -1215,6 +1431,8 @@ async function checkReinstall() {
   if (!fs.existsSync(path.join(APPDATA, "Altus", "tabs.json"))) failures.push("%APPDATA%\\Altus was moved or changed");
   if (backups().length !== 1) failures.push(`a reinstall created another backup (${backups().length} now)`);
   failures.push(...(await checkProgramsEntry()));
+  const command = await readProtocolCommand();
+  if (!isInstalledLinkCommand(command)) failures.push(`after reinstalling, the whatsapp:// registration is ${command ?? "gone"}`);
   return { failures, notes: [] };
 }
 
@@ -1234,6 +1452,8 @@ async function checkUninstall() {
   }
   if (!profileExisted) failures.push("no Altus + profile to check: the migration in check 7 did not create it");
   else if (!fs.existsSync(path.join(profile, "tabs.json"))) failures.push("the uninstaller removed the Altus + profile");
+  const command = await readProtocolCommand();
+  if (command) failures.push(`the whatsapp:// registration outlived the uninstall: ${command}`);
   return { failures, notes: [] };
 }
 
@@ -1250,16 +1470,16 @@ function findInstaller() {
 const checks = [
   ["1. Fuses; app.asar has the bundles, page, icons and translations", checkFuses],
   ["2. Modified app.asar is refused", checkTamperedAsar],
-  ["3. Fresh profile: window, tab, WhatsApp Web, no errors", checkFreshProfile],
+  ["3. Fresh profile: window, tab, WhatsApp Web, no errors; started by a whatsapp:// link", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand", checkStartInTray],
-  ["5. Three accounts: background sound and notifications, muted account, moving tabs, Resource Usage", checkBackgroundTabs],
+  ["5. Three accounts: background sound and notifications, muted account, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
   ["6. Resource test: restart into it, record three accounts, summary, normal restart", checkResourceTest],
 ];
 if (runInstaller) {
   checks.push(
-    ["7. Installer replaces the original Altus; app opens its tabs and settings; autostart written only when needed", checkInstallReplacingOriginal],
-    ["8. Reinstall leaves the profile and the original data alone", checkReinstall],
-    ["9. Uninstall removes the program and keeps the profile", checkUninstall],
+    ["7. Installer replaces the original Altus; app opens its tabs and settings; autostart written only when needed; whatsapp:// links registered while on", checkInstallReplacingOriginal],
+    ["8. Reinstall leaves the profile, the original data and the link registration alone", checkReinstall],
+    ["9. Uninstall removes the program and its link registration, keeps the profile", checkUninstall],
   );
 }
 

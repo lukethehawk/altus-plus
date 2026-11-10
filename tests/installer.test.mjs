@@ -33,3 +33,15 @@ test("NSIS scripts with accented text are saved with a UTF-8 BOM", () => {
     assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], file);
   }
 });
+
+test("uninstalling removes the whatsapp:// registration the app writes", async () => {
+  const { WHATSAPP_PROTOCOL, PROTOCOL_ARGS } = await import("../src/utils/whatsappLinks.ts");
+  const script = read("makers/nsis/whatsappLinks.nsh");
+  assert.ok(script.includes(`!define WHATSAPP_PROTOCOL_KEY "Software\\Classes\\${WHATSAPP_PROTOCOL}"`));
+  // The uninstaller matches the start of the command Electron writes,
+  // "<exe>" -- "%1", and keeps it on updates (--updated).
+  assert.deepEqual(PROTOCOL_ARGS, ["--"]);
+  assert.ok(script.includes(`StrCpy $1 '"$INSTDIR\\\${APP_EXECUTABLE_FILENAME}"'`));
+  assert.match(script, /\$\{IfNot\} \$\{isUpdated\}/);
+  assert.ok(read("makers/nsis/installer.nsh").includes(`!include "\${__FILEDIR__}\\whatsappLinks.nsh"`));
+});

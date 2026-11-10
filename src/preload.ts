@@ -99,6 +99,7 @@ const ipcHandlers: ElectronIPCHandlers = {
     ipcRenderer.on("open-whatsapp-link", handler);
     return () => ipcRenderer.off("open-whatsapp-link", handler);
   },
+  whatsappLinksReady: () => ipcRenderer.invoke("whatsapp-links-ready"),
   onReloadCustomTitleBar: (callback) => {
     ipcRenderer.on("reload-custom-title-bar", callback);
     return () => ipcRenderer.off("reload-custom-title-bar", callback);

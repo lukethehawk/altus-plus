@@ -17,6 +17,7 @@ import {
   restoreTab,
   setTabActive,
   tabStore,
+  tabStoreLoaded,
   updateAndSyncTabStore,
 } from "../stores/tabs/solid";
 import { Tab, getDefaultTab } from "../stores/tabs/common";
@@ -33,6 +34,9 @@ import TabEditDialog from "./TabEditDialog";
 import { twJoin } from "tailwind-merge";
 import { getSettingValue } from "../stores/settings/solid";
 import NewChatDialog from "./NewChatDialog";
+import WhatsAppLinkDialog from "./WhatsAppLinkDialog";
+import { describeWhatsAppWebAddress } from "../utils/whatsappLinks";
+import type { WebviewTag } from "electron";
 
 interface TabComponentProps {
   tab: Tab;
@@ -242,6 +246,25 @@ const TabsList: Component = () => {
 
   const [canShowNewChatDialog, setShowNewChatDialog] = createSignal(false);
 
+  // A whatsapp:// link (as a WhatsApp Web address) waiting for an account.
+  const [linkToOpen, setLinkToOpen] = createSignal<string | null>(null);
+  const openLinkInTab = (tabId: string, address: string) => {
+    const webview = document.getElementById(`webview-${tabId}`) as WebviewTag | null;
+    if (!webview) return;
+    setTabActive(tabId);
+    // What was opened, for the smoke test: src follows WhatsApp's redirects.
+    webview.dataset.openedLink = address;
+    webview.src = address;
+  };
+  const receiveWhatsAppLink = (address: string | null) => {
+    if (!address || !describeWhatsAppWebAddress(address)) return;
+    if (tabStore.tabs.length === 1) {
+      openLinkInTab(tabStore.tabs[0].id, address);
+    } else if (tabStore.tabs.length > 1) {
+      setLinkToOpen(address);
+    }
+  };
+
   const addNewTab = () => {
     addTab(getDefaultTab());
   };
@@ -323,12 +346,12 @@ const TabsList: Component = () => {
   );
 
   handlers.add(
-    window.electronIPCHandlers.onOpenWhatsappLink((url) => {
-      const activeWebview = getActiveWebviewElement();
-      if (!activeWebview) return;
-      activeWebview.src = url;
-    })
+    window.electronIPCHandlers.onOpenWhatsappLink(receiveWhatsAppLink)
   );
+  // Once the tabs are known, take the link the app was started with, if any.
+  void tabStoreLoaded
+    .then(() => window.electronIPCHandlers.whatsappLinksReady())
+    .then(receiveWhatsAppLink);
 
   handlers.add(
     window.electronIPCHandlers.onOpenTabDevTools(() => {
@@ -460,6 +483,25 @@ const TabsList: Component = () => {
               setShowNewChatDialog(false);
             }}
           />
+        </Show>
+      </Dialog.Root>
+      <Dialog.Root
+        open={linkToOpen() !== null}
+        onOpenChange={(open) => {
+          if (!open) setLinkToOpen(null);
+        }}
+      >
+        <Show when={linkToOpen()}>
+          {(address) => (
+            <WhatsAppLinkDialog
+              address={address()}
+              open={(tabId) => {
+                openLinkInTab(tabId, address());
+                setLinkToOpen(null);
+              }}
+              close={() => setLinkToOpen(null)}
+            />
+          )}
         </Show>
       </Dialog.Root>
     </>

@@ -73,8 +73,8 @@
   "Quit": "Esci",
   "trayIcon": "Icona nell'area di notifica",
   "trayIconDescription": "Mostra o nasconde l'icona nell'area di notifica",
-  "registerProtocol": "Registra il protocollo whatsapp://",
-  "registerProtocolDescription": "Se attivo, Altus + diventa l'app predefinita per i link whatsapp://. (NOTA: serve un riavvio per applicare la modifica.)",
+  "registerProtocol": "Apri i link whatsapp://",
+  "registerProtocolDescription": "I link come i pulsanti «Chatta su WhatsApp» dei siti si aprono in Altus +, nell'account che scegli. Spegnilo per lasciarli a un'altra app.",
   "closeToTray": "Chiudi nell'area di notifica",
   "closeToTrayDescription": "Se attivo, chiudendo la finestra Altus + resta attivo nell'area di notifica invece di chiudersi",
   "exitPrompt": "Chiedi conferma all'uscita",
@@ -205,5 +205,10 @@
   "C&opy Image Address": "Copia indiri&zzo immagine",
   "Copy Video Ad&dress": "Copia indiri&zzo video",
   "I&nspect Element": "Ispe&ziona elemento",
-  "Installing takes about a minute: a small notice stays on screen until it is done. Wait for it before opening Altus + again.": "L'installazione richiede circa un minuto: un piccolo avviso resta sullo schermo finché non è terminata. Attendi prima di riaprire Altus +."
+  "Installing takes about a minute: a small notice stays on screen until it is done. Wait for it before opening Altus + again.": "L'installazione richiede circa un minuto: un piccolo avviso resta sullo schermo finché non è terminata. Attendi prima di riaprire Altus +.",
+  "Open WhatsApp link": "Apri link WhatsApp",
+  "Which account should open it?": "Con quale account vuoi aprirlo?",
+  "Chat with {number}": "Chat con {number}",
+  "Group invite": "Invito a un gruppo",
+  "A message to send to a chat of your choice": "Un messaggio da inviare alla chat che scegli"
 }

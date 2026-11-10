@@ -10,6 +10,8 @@ export type ElectronIPCHandlers = {
   onFirstTab: (callback: () => void) => () => void;
   onLastTab: (callback: () => void) => () => void;
   onOpenWhatsappLink: (callback: (url: string) => void) => () => void;
+  /** From now on links arrive through onOpenWhatsappLink; returns one that came earlier. */
+  whatsappLinksReady: () => Promise<string | null>;
   onReloadCustomTitleBar: (callback: () => void) => () => void;
   onReloadTranslations: (callback: () => void) => () => void;
   onReloadSettings: (callback: () => void) => () => void;

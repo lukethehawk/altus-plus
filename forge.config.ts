@@ -14,7 +14,8 @@ const config: ForgeConfig = {
     appCategoryType: "public.app-category.social-networking",
     // The exe's copyright line; without it, it keeps Electron's own.
     appCopyright: COPYRIGHT,
-    // No whatsapp:// protocol registration, so official Altus keeps it.
+    // No whatsapp:// registration here: the app registers itself only while
+    // its setting is on, so another WhatsApp app keeps the links by default.
     asar: true,
     // The Vite bundles in .vite/ inline every runtime dependency; this
     // plugin-vite version does not prune the app folder by itself, so ship

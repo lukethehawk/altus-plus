@@ -31,6 +31,7 @@ The original project is no longer updated. Altus + keeps it running on a current
 | 🔊 **Background audio** | Voice messages keep playing when you switch tab; inactive tabs are never suspended or muted. |
 | 📎 **Download notice** | "Attachment saved · Show in folder" after each download. |
 | ⌨️ **Enter keys** | With Settings → *Prevent sending message on Enter*, Enter adds a new line and Ctrl+Enter sends. With *Send with Right Shift + Enter*, Right Shift + Enter sends and Left Shift + Enter adds a new line. |
+| 🔗 **whatsapp:// links** | With Settings → *Open whatsapp:// links*, links such as a website's "Chat on WhatsApp" button open in Altus +, after asking which account should open them. Off by default, so another WhatsApp app keeps them. |
 | 🌙 **Starts in the tray** | With Settings → *Launch at system startup* and *Start in Tray with Windows*, Altus + starts at Windows sign-in with only its tray icon; the accounts connect and notify as usual. Opened from the Start menu, it always shows the window. |
 | 📊 **Resource usage** | Help → Resource Usage shows each account's CPU and memory, refreshed while open. Help → Run Resource Test records them from startup into a CSV file until you end it, with a summary of how long startup took and how memory changed. |
 | 🩹 **Crash recovery** | A crashed or frozen account reloads on its own without touching the others. |

@@ -10,5 +10,6 @@ export const CommonConfig: Partial<Configuration> = {
   appId: "com.lukethehawk.altusplus",
   productName: "Altus +",
   copyright: COPYRIGHT,
-  // Deliberately do not register the whatsapp:// protocol.
+  // The installer does not register whatsapp:// links: the app does it only
+  // while Settings → "Open whatsapp:// links" is on (src/main.ts).
 };

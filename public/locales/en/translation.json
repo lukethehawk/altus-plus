@@ -73,8 +73,8 @@
   "Quit": "Quit",
   "trayIcon": "Tray Icon",
   "trayIconDescription": "Controls whether the tray icon is visible or not",
-  "registerProtocol": "Register whatsapp:// Protocol",
-  "registerProtocolDescription": "If enabled, Altus will register itself as the default handler for whatsapp:// links. (NOTE: Requires a restart for changes to apply.)",
+  "registerProtocol": "Open whatsapp:// links",
+  "registerProtocolDescription": "Links such as the \"Chat on WhatsApp\" buttons of websites open in Altus +, in the account you choose. Turn off to leave them to another app.",
   "closeToTray": "Close to Tray",
   "closeToTrayDescription": "When enabled, Altus will be minimized to the tray instead of being closed completely",
   "exitPrompt": "Show Exit Prompt",
@@ -205,5 +205,10 @@
   "C&opy Image Address": "C&opy Image Address",
   "Copy Video Ad&dress": "Copy Video Ad&dress",
   "I&nspect Element": "I&nspect Element",
-  "Installing takes about a minute: a small notice stays on screen until it is done. Wait for it before opening Altus + again.": "Installing takes about a minute: a small notice stays on screen until it is done. Wait for it before opening Altus + again."
+  "Installing takes about a minute: a small notice stays on screen until it is done. Wait for it before opening Altus + again.": "Installing takes about a minute: a small notice stays on screen until it is done. Wait for it before opening Altus + again.",
+  "Open WhatsApp link": "Open WhatsApp link",
+  "Which account should open it?": "Which account should open it?",
+  "Chat with {number}": "Chat with {number}",
+  "Group invite": "Group invite",
+  "A message to send to a chat of your choice": "A message to send to a chat of your choice"
 }
