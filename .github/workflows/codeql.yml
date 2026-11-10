@@ -1,0 +1,44 @@
+name: CodeQL
+
+# GitHub's static analysis for security problems: the app's TypeScript (for
+# example unchecked URLs or IPC input reaching navigation, the shell or the
+# file system) and these workflows (for example untrusted input in a run
+# step). Findings show under Security -> Code scanning and on pull requests.
+# Not a required check of the "Protect master" ruleset: findings are triaged
+# like Dependabot alerts.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          # TypeScript and workflows are read as source: nothing is built.
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
