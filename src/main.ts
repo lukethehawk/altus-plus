@@ -80,6 +80,12 @@ import {
   setupAutoUpdater,
 } from "./updater";
 import { isAltusPartition, isTrustedWhatsAppURL, getSafeExternalHttpURL } from "./utils/security";
+import {
+  PROTOCOL_ARGS,
+  WHATSAPP_PROTOCOL,
+  findWhatsAppLink,
+  whatsAppWebAddress,
+} from "./utils/whatsappLinks";
 import { SettingsSchema } from "./stores/settings/common";
 
 const windowState = new Store<{
@@ -522,9 +528,7 @@ if (!singleInstanceLock) {
     mainWindow.show();
     mainWindow.focus();
 
-    if (argv.find((arg) => arg.includes("whatsapp"))) {
-      handleWhatsappLinks(argv);
-    }
+    handleWhatsappLinks(argv);
   });
 
   app.on("ready", () => {
@@ -542,9 +546,8 @@ if (!singleInstanceLock) {
       ""
     );
 
-    if (process.argv.some((arg) => arg.includes("whatsapp"))) {
-      handleWhatsappLinks(process.argv);
-    }
+    // Kept until the window can ask which account opens it.
+    handleWhatsappLinks(process.argv);
 
     pruneUnusedPartitions(
       electronTabStore.get("tabs"),
@@ -598,6 +601,7 @@ if (!singleInstanceLock) {
     });
 
     addIPCHandlers(mainWindow);
+    updateProtocolRegistration();
   });
 
   // Closing the last window or an update quits without exitApp().
@@ -696,20 +700,54 @@ const localizedContextMenuLabels = Object.defineProperties(
   )
 ) as Record<keyof typeof contextMenuLabelKeys, string>;
 
+// A whatsapp:// link waiting for the window to be ready to ask which account
+// opens it (the link the app was started with arrives before the window).
+let pendingWhatsAppAddress: string | null = null;
+let windowTakesWhatsAppLinks = false;
+
+/**
+ * Opens a whatsapp:// link from the command line: the one the app was started
+ * with, or one that Windows passes to a second start while the app runs. Only
+ * chats and group invites are accepted; the window asks which account opens
+ * them.
+ */
 function handleWhatsappLinks(argv: string[]) {
-  const arg = argv.find((arg) => arg.includes("whatsapp"));
-  if (!arg) return;
-
-  let url = "https://web.whatsapp.com/";
-
-  if (arg.includes("send/?phone")) {
-    url += arg.split("://")[1].replace("/", "");
-  } else if (arg.includes("chat/?code")) {
-    url += "accept?code=" + arg.split("=")[1];
+  const link = findWhatsAppLink(argv);
+  if (!link) return;
+  const address = whatsAppWebAddress(link);
+  if (!address || !isTrustedWhatsAppURL(address)) {
+    // Not logged: the link may hold a phone number or a message.
+    console.warn("Ignored a whatsapp:// link that is not a chat or a group invite");
+    return;
   }
-
   const mainWindow = BrowserWindow.getAllWindows()[0];
-  mainWindow.webContents.send("open-whatsapp-link", url);
+  if (windowTakesWhatsAppLinks && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("open-whatsapp-link", address);
+  } else {
+    pendingWhatsAppAddress = address;
+  }
+}
+
+/**
+ * Makes Altus + the handler of whatsapp:// links while the setting is on, and
+ * stops being it once the setting is off. Only a registration that points to
+ * this installation is removed, so an app that took the links over since is
+ * left alone. (Uninstalling removes it too: makers/nsis/whatsappLinks.nsh.)
+ */
+function updateProtocolRegistration() {
+  // A development run would register electron.exe, and a run on a throwaway
+  // profile (smoke test) must not change what the installed app does.
+  if (!app.isPackaged || hasExplicitProfileDirectory()) return;
+  try {
+    const registered = app.isDefaultProtocolClient(WHATSAPP_PROTOCOL, process.execPath, PROTOCOL_ARGS);
+    if (getSettingWithDefault("registerProtocol")) {
+      if (!registered) app.setAsDefaultProtocolClient(WHATSAPP_PROTOCOL, process.execPath, PROTOCOL_ARGS);
+    } else if (registered) {
+      app.removeAsDefaultProtocolClient(WHATSAPP_PROTOCOL, process.execPath, PROTOCOL_ARGS);
+    }
+  } catch (error) {
+    console.warn("Could not update the whatsapp:// registration", error);
+  }
 }
 
 function pruneUnusedPartitions(
@@ -829,6 +867,20 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     return pathToFileURL(path.join(__dirname, "whatsapp.preload.cjs")).href;
   });
 
+  // The window asks which account opens a whatsapp:// link from now on; one
+  // that arrived earlier (the link the app was started with) is handed over.
+  handle("whatsapp-links-ready", () => {
+    windowTakesWhatsAppLinks = true;
+    const address = pendingWhatsAppAddress;
+    pendingWhatsAppAddress = null;
+    return address;
+  });
+  // While the window itself (re)loads, links wait for it to ask again.
+  // (Navigation inside the account webviews is theirs, not the window's.)
+  mainWindow.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) windowTakesWhatsAppLinks = false;
+  });
+
   handle("settings-store-get", () => {
     return electronSettingsStore.store;
   });
@@ -853,6 +905,10 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
         return;
       } else if (key === "tabReordering") {
         setTabReordering(value as boolean);
+        return;
+      } else if (key === "registerProtocol") {
+        electronSettingsStore.set(key, { value });
+        updateProtocolRegistration();
         return;
       }
       return electronSettingsStore.set(key, { value });

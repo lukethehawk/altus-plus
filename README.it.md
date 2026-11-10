@@ -31,6 +31,7 @@ Il progetto originale non riceve più aggiornamenti. Altus + lo mantiene su una 
 | 🔊 **Audio in background** | I vocali continuano a suonare quando cambi scheda; le schede inattive non vengono mai sospese né silenziate. |
 | 📎 **Avviso download** | "Allegato salvato · Mostra nella cartella" dopo ogni download. |
 | ⌨️ **Tasti Invio** | Con Impostazioni → *Non inviare il messaggio con Invio*, Invio va a capo e Ctrl+Invio invia. Con *Invia con Shift destro + Invio*, Shift destro + Invio invia e Shift sinistro + Invio va a capo. |
+| 🔗 **Link whatsapp://** | Con Impostazioni → *Apri i link whatsapp://*, i link come il pulsante «Chatta su WhatsApp» di un sito si aprono in Altus +, dopo aver chiesto con quale account. Spento per default, così un'altra app WhatsApp li tiene. |
 | 🌙 **Avvio nel tray** | Con Impostazioni → *Avvia all'accesso al sistema* e *Avvia nell'area di notifica con Windows*, all'accesso a Windows Altus + parte con la sola icona nel tray; gli account si collegano e notificano come sempre. Aperto dal menu Start, mostra sempre la finestra. |
 | 📊 **Uso risorse** | Aiuto → Uso risorse mostra CPU e memoria di ogni account, aggiornate mentre è aperto. Aiuto → Fai test delle risorse le registra dall'avvio in un file CSV finché non lo termini, con un riepilogo di quanto è durato l'avvio e di come è cambiata la memoria. |
 | 🩹 **Ripristino dai crash** | Un account che si blocca o va in crash si ricarica da solo, senza toccare gli altri. |

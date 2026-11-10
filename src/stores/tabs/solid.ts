@@ -35,7 +35,8 @@ createEffect(() => {
   }
 });
 
-window.electronTabStore.getStore().then((store) => {
+/** Resolves once the saved tabs are in tabStore. */
+export const tabStoreLoaded = window.electronTabStore.getStore().then((store) => {
   const hasNoTabsOnLoad = store.tabs.length === 0;
   if (hasNoTabsOnLoad) {
     const tab = getDefaultTab();
