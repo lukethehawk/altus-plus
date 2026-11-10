@@ -283,7 +283,7 @@ test("writes the summary in the app's language, with every template filled", () 
     assert.match(text, / 0[.,]01 s\r\n/);
     assert.match(text, /Lavoro 3[.,]0 s, =Casa 4[.,]0 s/);
     assert.match(text, /\+12[.,]0/);
-    assert.match(text, new RegExp(strings.resourceTestSummaryMainTitle.replace(/[()]/g, "\\$&")));
+    assert.match(text, new RegExp(strings.resourceTestSummaryMainTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(text, /\+3[.,]0/);
     assert.match(text, /JavaScript: 20[.,]\d MB/);
     assert.match(text, /resource-test-x\.csv/);

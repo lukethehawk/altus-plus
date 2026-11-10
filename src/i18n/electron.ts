@@ -104,15 +104,15 @@ export class ElectronI18N {
     try {
       console.log(`Key missing: ${key}`);
       const missingKeysFile = `./public/locales/${this.language}/translation.missing.json`;
-      if (!existsSync(missingKeysFile)) {
-        writeFileSync(missingKeysFile, "{}");
+      // Read and rewrite without a separate existence check, which another
+      // write could overtake (development runs only).
+      let missingKeys: Record<string, string> = {};
+      try {
+        const contents = readFileSync(missingKeysFile, { encoding: "utf-8" });
+        if (contents) missingKeys = JSON.parse(contents);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      const contents = readFileSync(missingKeysFile, { encoding: "utf-8" });
-      if (!contents) {
-        writeFileSync(missingKeysFile, JSON.stringify({ [key]: key }, null, 2));
-        return;
-      }
-      const missingKeys = JSON.parse(contents);
       missingKeys[key] = key;
       writeFileSync(missingKeysFile, JSON.stringify(missingKeys, null, 2));
     } catch (error) {
