@@ -1,3 +1,5 @@
+import { escapeHtml } from "../escapeHtml";
+
 type TextWrapper = "*" | "_" | "~" | "```";
 
 function setCaretPosition({
@@ -136,7 +138,9 @@ export function formatSelectedText(wrapper: TextWrapper) {
     const didFormat = formatSingleLine(selection, wrapper);
     if (!didFormat) return;
     if (messageInput.innerHTML.length !== 0) {
-      insertMessageText(wrapper + messageInput.textContent + wrapper);
+      // Plain text going back in as HTML: escaped, so that pasted text such
+      // as <img onerror=…> stays text instead of running in the page.
+      insertMessageText(escapeHtml(wrapper + messageInput.textContent + wrapper));
     } else {
       insertMessageText(wrapper + wrapper);
     }

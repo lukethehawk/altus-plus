@@ -26,7 +26,7 @@ const NewChatDialog = (props: { close: () => void }) => {
         >
           <div class="flex items-center justify-between">
             <Dialog.Title class="font-semibold">
-              {t("Start &New Chat").replace("&", "")}
+              {t("Start &New Chat").replaceAll("&", "")}
             </Dialog.Title>
             <Dialog.CloseButton class="p-1 bg-zinc-700/50 hover:bg-zinc-600 rounded outline-none border border-transparent focus:border-zinc-300">
               <CloseIcon class="w-4 h-4" />
