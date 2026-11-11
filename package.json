@@ -1,7 +1,7 @@
 {
   "name": "altus-plus",
   "productName": "Altus +",
-  "version": "5.8.1-plus.25",
+  "version": "5.8.1-plus.26",
   "description": "Altus +: multi-account WhatsApp Web desktop app for Windows, a maintained fork of Altus.",
   "homepage": "https://github.com/lukethehawk/altus-plus",
   "repository": {
@@ -55,7 +55,7 @@
     "autoprefixer": "^10.4.15",
     "debug": "^4.3.4",
     "dmg-builder": "26.18.1",
-    "electron": "44.10.2",
+    "electron": "44.11.1",
     "eslint": "^8.0.1",
     "eslint-plugin-import": "^2.31.0",
     "fs-extra": "^10.1.0",
