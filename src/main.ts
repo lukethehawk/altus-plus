@@ -82,6 +82,7 @@ import {
   checkForUpdates,
   installDownloadedUpdate,
   isQuittingForUpdate,
+  scheduleUpdateChecks,
   setupAutoUpdater,
 } from "./updater";
 import { isAltusPartition, isTrustedWhatsAppURL, getSafeExternalHttpURL } from "./utils/security";
@@ -603,6 +604,8 @@ if (!singleInstanceLock) {
           void checkForUpdates({ interactive: false });
         }, 20_000);
       }
+      // The app can run for days from the tray: check again every 6 hours.
+      scheduleUpdateChecks(() => getSettingWithDefault("checkForUpdates"));
     });
 
     addIPCHandlers(mainWindow);
