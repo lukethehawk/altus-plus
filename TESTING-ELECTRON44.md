@@ -10,7 +10,7 @@ never reads or changes official Altus's sessions.
 | App ID | harwara.aman.altus | com.lukethehawk.altusplus |
 | Windows data directory | Usually `%APPDATA%\\Altus` | `%APPDATA%\\Altus Electron 44 Test` |
 | whatsapp:// registration | Optional, on by default | Optional, off by default |
-| Electron | 35.1.5 | 44.11.1 |
+| Electron | 35.1.5 | 44.11.3 |
 
 The data directory keeps the name of the earlier "Altus Electron 44 Test"
 builds, so accounts paired there stay logged in. A first install pairs new

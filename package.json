@@ -55,7 +55,7 @@
     "autoprefixer": "^10.4.15",
     "debug": "^4.3.4",
     "dmg-builder": "26.18.1",
-    "electron": "44.11.1",
+    "electron": "44.11.3",
     "eslint": "^8.0.1",
     "eslint-plugin-import": "^2.31.0",
     "fs-extra": "^10.1.0",
