@@ -47,7 +47,12 @@ import {
   LEGACY_TEST_BUILD_NAME,
   hasExplicitProfileDirectory,
 } from "./utils/isolation";
-import { getPartitionsToPrune } from "./utils/partitions";
+import {
+  getClosedTabIds,
+  planPartitionCleanup,
+  readClosedTabIds,
+  writeClosedTabIds,
+} from "./utils/partitions";
 import { recoverRendererOnFailure } from "./utils/rendererRecovery";
 import { REPOSITORY_URL } from "./utils/updates";
 import {
@@ -750,36 +755,69 @@ function updateProtocolRegistration() {
   }
 }
 
+/**
+ * Deletes the partition folders of tabs the user closed (recorded by
+ * recordClosedTab), except the last one, which can still be reopened.
+ * Folders no closed tab names are kept, whatever the tab list says.
+ */
 function pruneUnusedPartitions(
   tabs: Tab[],
   previouslyClosedTab: Tab | null,
   userDataPath: string
 ) {
+  const closedTabIds = readClosedTabIds(userDataPath);
+  // Unreadable, or nothing closed: nothing to delete.
+  if (!closedTabIds?.length) return;
+
   const partitionsDirectoryPath = path.join(userDataPath, "Partitions");
-
-  const doesPartitionsDirectoryExist = fs.existsSync(partitionsDirectoryPath);
-  if (!doesPartitionsDirectoryExist) return;
-
-  const tabIds = tabs.map((tab) => tab.id);
-  if (previouslyClosedTab) {
-    tabIds.push(previouslyClosedTab.id);
-  }
-
-  let partitions: string[];
+  let partitionFolders: string[] = [];
   try {
-    partitions = fs.readdirSync(partitionsDirectoryPath);
+    if (fs.existsSync(partitionsDirectoryPath)) partitionFolders = fs.readdirSync(partitionsDirectoryPath);
   } catch (error) {
     console.error("Could not list partitions", error);
     return;
   }
 
-  for (const id of getPartitionsToPrune(partitions, tabIds)) {
+  const { remove, stillClosed } = planPartitionCleanup({
+    partitionFolders,
+    openTabIds: Array.isArray(tabs) ? tabs.map((tab) => tab?.id).filter((id) => typeof id === "string") : [],
+    previouslyClosedTabId: typeof previouslyClosedTab?.id === "string" ? previouslyClosedTab.id : null,
+    closedTabIds,
+  });
+  for (const folder of remove) {
     // A locked file must not abort startup; retry on the next launch.
     try {
-      fs.rmSync(path.join(partitionsDirectoryPath, id), { recursive: true });
+      fs.rmSync(path.join(partitionsDirectoryPath, folder), { recursive: true });
     } catch (error) {
-      console.warn("Could not remove unused partition", error);
+      console.warn("Could not remove a closed tab's partition", error);
+      stillClosed.push(folder);
     }
+  }
+  try {
+    writeClosedTabIds(userDataPath, stillClosed);
+  } catch (error) {
+    console.warn("Could not update the closed tabs", error);
+  }
+}
+
+/**
+ * Called before the window saves a new tab list: the tab it drops is one the
+ * user closed, so its folder may be deleted at a later start.
+ */
+function recordClosedTab(newTabs: unknown) {
+  const saved = electronTabStore.get("tabs");
+  const savedTabIds = Array.isArray(saved) ? saved.map((tab) => tab?.id).filter((id) => typeof id === "string") : [];
+  const closed = getClosedTabIds(savedTabIds, newTabs);
+  if (closed === null) {
+    console.warn("The new tab list drops several tabs at once; their data is kept");
+    return;
+  }
+  if (closed.length === 0) return;
+  const userDataPath = app.getPath("userData");
+  try {
+    writeClosedTabIds(userDataPath, [...(readClosedTabIds(userDataPath) ?? []), ...closed]);
+  } catch (error) {
+    console.warn("Could not record a closed tab", error);
   }
 }
 
@@ -924,6 +962,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     (event, key: keyof TabStore, value: unknown) => {
       if (event.sender !== mainWindow.webContents) throw new Error("Unauthorized tab sender");
       if (!["tabs", "selectedTabId", "previouslyClosedTab"].includes(key)) throw new Error("Invalid tab store key");
+      if (key === "tabs" && value !== undefined) recordClosedTab(value);
       if (value === undefined) electronTabStore.delete(key);
       else electronTabStore.set(key, value);
       // Names, order and mutes of the accounts.
