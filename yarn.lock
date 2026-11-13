@@ -1990,7 +1990,7 @@ __metadata:
     color2k: "npm:^2.0.3"
     debug: "npm:^4.3.4"
     dmg-builder: "npm:26.18.1"
-    electron: "npm:44.11.1"
+    electron: "npm:44.11.3"
     electron-context-menu: "npm:^4.0.5"
     electron-dl: "npm:^4.0.0"
     electron-store: "npm:^8.1.0"
@@ -3295,9 +3295,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"electron@npm:44.11.1":
-  version: 44.11.1
-  resolution: "electron@npm:44.11.1"
+"electron@npm:44.11.3":
+  version: 44.11.3
+  resolution: "electron@npm:44.11.3"
   dependencies:
     "@electron-internal/extract-zip": "npm:^1.0.1"
     "@electron/get": "npm:^5.0.0"
@@ -3305,7 +3305,7 @@ __metadata:
   bin:
     electron: cli.js
     install-electron: install.js
-  checksum: 10c0/05e0845b5fce0880edcae56a6087df5d90653d8312336ce63039adab69fa42fac1848926452b96506466d9ddc1b6728d60d3894d3de6690399344f69ba181e73
+  checksum: 10c0/ddf2b4c5a09b3e6e68cf96e4da254850f552a09d19f5173aadd39cd2d9587797c75eb160dffceca924e72285d8d5a27dc8b2ce7b5bd14722b8b0de24fff95309
   languageName: node
   linkType: hard
 
