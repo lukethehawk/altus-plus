@@ -171,6 +171,14 @@ fails it uploads no installer.
 4. With "Start in tray with Windows" on, a start with `--hidden` (what the
    autostart entry runs) shows no window, yet the tab reaches WhatsApp
    Web. A start without it shows the window.
+
+   The profile has no `tabs.json`, as if it had been lost, but holds the
+   partition folders of three accounts and of a tab closed earlier (listed
+   in `closed-tabs.json`). The first start saves a new tab. The second start
+   must keep the three accounts' folders (it used to delete every folder
+   the tab list did not name), delete the closed tab's folder and drop it
+   from `closed-tabs.json`. Closing the new tab by hand then records it
+   there.
 5. Three tabs: "Alfa" selected, "Beta" and "Gamma" in the background,
    Gamma with notifications muted. Run with the window shown and again
    started into the tray (`--hidden`):

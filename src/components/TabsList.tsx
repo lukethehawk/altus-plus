@@ -182,6 +182,7 @@ const TabComponent: Component<TabComponentProps> = (props) => {
           </button>
           <button
             class="flex items-center justify-center w-6 h-6 hover:bg-zinc-800/50 rounded group-data-[selected]:hover:bg-zinc-800/50"
+            data-close-tab={props.tab.id}
             onClick={() => {
               props.removeTab(props.tab);
             }}

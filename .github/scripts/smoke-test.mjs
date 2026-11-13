@@ -13,7 +13,11 @@
 //    only account opens the chat (and a run on its own profile never
 //    registers the app for the links);
 // 4. "Start in tray with Windows": started with the autostart flag the window
-//    stays hidden while the tab still loads; started by hand it opens;
+//    stays hidden while the tab still loads; started by hand it opens.
+//    The profile starts without tabs.json, as if it were lost: the first
+//    start saves a new tab, and the second one must keep the data of the
+//    accounts the list no longer names (it used to delete them), delete only
+//    the folder of a tab closed earlier, and record the tab closed by hand;
 // 5. tabs in the background, also with the whole app in the tray, keep
 //    playing sound (also after switching tab) and show notifications labelled
 //    with their account, and a muted account's notification is suppressed.
@@ -588,24 +592,73 @@ async function checkFreshProfile() {
   return result;
 }
 
+// The profile has no tabs.json, as if it had been lost, but holds the data of
+// three accounts and of a tab the user closed earlier.
+const UNLISTED_ACCOUNT_FOLDERS = ["smokeunlistedalfa1", "smokeunlistedbeta2", "smokeunlistedgamma3"];
+const EARLIER_CLOSED_TAB = "SmokeClosedEarlier01";
+
+/** The closed tabs the app recorded in the profile. */
+function recordedClosedTabs(profile) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(profile, "closed-tabs.json"), "utf8")).ids ?? [];
+  } catch {
+    return [];
+  }
+}
+
 async function checkStartInTray() {
   const profile = fs.mkdtempSync(path.join(TEMP, "as-p-"));
-  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({ launchToTray: { value: true } }));
+  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({
+    launchToTray: { value: true }, tabClosePrompt: { value: false },
+  }));
+  const partitions = path.join(profile, "Partitions");
+  for (const folder of [...UNLISTED_ACCOUNT_FOLDERS, EARLIER_CLOSED_TAB.toLowerCase()]) {
+    fs.mkdirSync(path.join(partitions, folder), { recursive: true });
+    fs.writeFileSync(path.join(partitions, folder, "marker"), "");
+  }
+  fs.writeFileSync(path.join(profile, "closed-tabs.json"), JSON.stringify({ ids: [EARLIER_CLOSED_TAB] }));
+
   const expected = { label: ADD_TAB_LABEL.en, otherLabel: ADD_TAB_LABEL.it, tabNames: ["New Tab"], tabCount: 1 };
-  // What the autostart entry runs (auto-launch isHidden adds --hidden).
+  // What the autostart entry runs (auto-launch isHidden adds --hidden). It
+  // finds no tabs and saves a new one.
   const atLogin = await checkRunningApp("start-in-tray", PACKAGED_EXE, [`--user-data-dir=${profile}`, "--hidden"], {
     ...expected,
     windowShown: false,
   }, 9413);
+  // The second start knows only that new tab; then the user closes it.
+  let closedByHand = null;
   const byHand = await checkRunningApp("start-in-tray-manual", PACKAGED_EXE, [`--user-data-dir=${profile}`], {
     ...expected,
     windowShown: true,
+    afterLoad: async ({ cdp, failures }) => {
+      const id = await cdp.evaluate(`document.querySelector("webview")?.id.replace(/^webview-/, "") ?? null`);
+      await cdp.evaluate(`document.querySelector(${JSON.stringify(`[data-close-tab="${id}"]`)})?.click()`);
+      try {
+        await waitFor("the closed tab in closed-tabs.json", 10_000, async () => recordedClosedTabs(profile).includes(id));
+        closedByHand = id;
+      } catch (error) {
+        failures.push(error.message);
+      }
+    },
   }, 9414);
+
+  const dataFailures = [];
+  const deleted = UNLISTED_ACCOUNT_FOLDERS.filter((folder) => !fs.existsSync(path.join(partitions, folder, "marker")));
+  if (deleted.length) dataFailures.push(`deleted the data of accounts the lost tab list did not name: ${deleted.join(", ")}`);
+  if (fs.existsSync(path.join(partitions, EARLIER_CLOSED_TAB.toLowerCase()))) {
+    dataFailures.push("kept the folder of a tab closed before these starts");
+  }
+  const recorded = recordedClosedTabs(profile);
+  if (recorded.includes(EARLIER_CLOSED_TAB)) dataFailures.push("still lists the deleted closed tab in closed-tabs.json");
+  if (closedByHand && !sameJson(recorded, [closedByHand])) {
+    dataFailures.push(`closed-tabs.json lists ${JSON.stringify(recorded)} instead of the tab closed by hand`);
+  }
   removeTemp(profile);
   return {
     failures: [
       ...atLogin.failures.map((line) => `with Windows: ${line}`),
       ...byHand.failures.map((line) => `by hand: ${line}`),
+      ...dataFailures.map((line) => `account data: ${line}`),
     ],
     notes: [...atLogin.notes, ...byHand.notes],
   };
@@ -1471,7 +1524,7 @@ const checks = [
   ["1. Fuses; app.asar has the bundles, page, icons and translations", checkFuses],
   ["2. Modified app.asar is refused", checkTamperedAsar],
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors; started by a whatsapp:// link", checkFreshProfile],
-  ["4. Start in tray with Windows: hidden but connected; opens when started by hand", checkStartInTray],
+  ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account", checkStartInTray],
   ["5. Three accounts: background sound and notifications, muted account, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
   ["6. Resource test: restart into it, record three accounts, summary, normal restart", checkResourceTest],
 ];
