@@ -1,7 +1,12 @@
 import { app, dialog, shell, type NativeImage } from "electron";
 import { autoUpdater } from "electron-updater";
 import { APP_NAME } from "./utils/isolation";
-import { REPOSITORY_URL } from "./utils/updates";
+import {
+  REPOSITORY_URL,
+  UPDATE_CHECK_INTERVAL_MS,
+  UPDATE_CHECK_TICK_MS,
+  isUpdateCheckDue,
+} from "./utils/updates";
 
 type Translate = (key: string) => string;
 
@@ -10,6 +15,11 @@ let getLanguage: () => string = () => "en";
 let dialogIcon: NativeImage | undefined;
 let configured = false;
 let interactiveCheck = false;
+/** True while asking the feed whether there is a newer release. */
+let checking = false;
+/** When a check last started, for the background checks. */
+let lastCheckAt: number | null = null;
+let downloadingVersion: string | null = null;
 let downloadedVersion: string | null = null;
 let quittingForUpdate = false;
 
@@ -64,27 +74,23 @@ export function setupAutoUpdater(options: {
   });
 
   autoUpdater.on("update-available", (info) => {
+    downloadingVersion = info.version;
     // Stay interactive until the download finishes, so a failed download is
     // reported to the user who asked for the check.
     if (!interactiveCheck) return;
-    void dialog.showMessageBox({
-      type: "info",
-      message: `${translate("Downloading update")}: ${APP_NAME} ${info.version}`,
-      detail: translate(
-        "It is downloading in the background. You will be asked to restart when it is ready."
-      ),
-      icon: dialogIcon,
-    });
+    showDownloading(info.version);
   });
 
   autoUpdater.on("update-downloaded", (info) => {
     interactiveCheck = false;
+    downloadingVersion = null;
     downloadedVersion = info.version;
     passLanguageToInstaller();
     promptToRestart(info.version);
   });
 
   autoUpdater.on("error", (error) => {
+    downloadingVersion = null;
     if (!interactiveCheck) return;
     interactiveCheck = false;
     void dialog
@@ -116,6 +122,18 @@ export async function checkForUpdates({ interactive }: { interactive: boolean })
     if (interactive) promptToRestart(downloadedVersion);
     return;
   }
+  if (downloadingVersion) {
+    if (interactive) showDownloading(downloadingVersion);
+    return;
+  }
+  if (checking) {
+    // A background check never takes over the one the user asked for; the
+    // user's request joins a running background check and gets its answer.
+    if (interactive) interactiveCheck = true;
+    return;
+  }
+  checking = true;
+  lastCheckAt = Date.now();
   interactiveCheck = interactive;
   try {
     const result = await autoUpdater.checkForUpdates();
@@ -123,8 +141,39 @@ export async function checkForUpdates({ interactive }: { interactive: boolean })
     // through the "error" event.
     result?.downloadPromise?.catch(() => undefined);
   } catch {
-    // Reported through the "error" event.
+    // Reported through the "error" event. Offline (say, right after
+    // waking up): the next hourly look tries again.
+    lastCheckAt = null;
+  } finally {
+    checking = false;
   }
+}
+
+/**
+ * Checks again in the background while the app keeps running, when the
+ * setting allows it. Local update test builds check every minute.
+ */
+export function scheduleUpdateChecks(isEnabled: () => boolean) {
+  const testing = !!ALTUS_TEST_UPDATE_FEED;
+  const intervalMs = testing ? 60_000 : UPDATE_CHECK_INTERVAL_MS;
+  // Startup has its own check; count from here, so that a setting turned on
+  // later still gets one within the interval.
+  lastCheckAt ??= Date.now();
+  setInterval(() => {
+    if (!isEnabled() || !isUpdateCheckDue(lastCheckAt, Date.now(), intervalMs)) return;
+    void checkForUpdates({ interactive: false });
+  }, testing ? 10_000 : UPDATE_CHECK_TICK_MS);
+}
+
+function showDownloading(version: string) {
+  void dialog.showMessageBox({
+    type: "info",
+    message: `${translate("Downloading update")}: ${APP_NAME} ${version}`,
+    detail: translate(
+      "It is downloading in the background. You will be asked to restart when it is ready."
+    ),
+    icon: dialogIcon,
+  });
 }
 
 function promptToRestart(version: string) {

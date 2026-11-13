@@ -71,7 +71,15 @@ build at a generic feed instead of GitHub; release builds never set it.
 2. Build an older version with
    `ALTUS_TEST_UPDATE_FEED=http://127.0.0.1:8765/ yarn package -p win32`.
 3. Run it with `--user-data-dir` on a throwaway profile and use
-   Help → Check for Updates. Do not choose "Restart now" on a machine where
-   Altus + is installed for real: the installer would replace it.
+   Help → Check for Updates. A test build also checks again on its own
+   every minute (release builds: every 6 hours): to test that, serve a
+   `latest.yml` with the old version first and put the new files in place
+   after the startup check.
+4. Never choose "Restart now" in the "Update ready" dialog, which also
+   appears on its own after a background download: it installs the new
+   build for real (`%LOCALAPPDATA%\Programs\Altus +`) and starts it on the
+   default profile. Stop the test app by PID instead (a normal quit installs
+   the downloaded update too). If it got installed, uninstall it with
+   `"Uninstall Altus +.exe" /currentuser /S`; the profile stays.
 
 Downloads are cached in `%LOCALAPPDATA%\altus-plus-updater`.

@@ -35,7 +35,7 @@ Il progetto originale non riceve più aggiornamenti. Altus + lo mantiene su una 
 | 🌙 **Avvio nel tray** | Con Impostazioni → *Avvia all'accesso al sistema* e *Avvia nell'area di notifica con Windows*, all'accesso a Windows Altus + parte con la sola icona nel tray; gli account si collegano e notificano come sempre. Aperto dal menu Start, mostra sempre la finestra. |
 | 📊 **Uso risorse** | Aiuto → Uso risorse mostra CPU e memoria di ogni account, aggiornate mentre è aperto. Aiuto → Fai test delle risorse le registra dall'avvio in un file CSV finché non lo termini, con un riepilogo di quanto è durato l'avvio e di come è cambiata la memoria. |
 | 🩹 **Ripristino dai crash** | Un account che si blocca o va in crash si ricarica da solo, senza toccare gli altri. |
-| ⬆️ **Aggiornamenti integrati** | Le nuove versioni si scaricano in background, vengono verificate (SHA512) e si installano con un clic. Durante l'installazione resta visibile un avviso. |
+| ⬆️ **Aggiornamenti integrati** | Altus + cerca nuove versioni all'avvio e ogni 6 ore mentre resta aperto. Si scaricano in background, vengono verificate (SHA512) e si installano con un clic. Durante l'installazione resta visibile un avviso. |
 | 🌐 **English / Italiano** | Impostazioni → Lingua, con effetto immediato. |
 | 🛡️ **Più sicura** | Electron aggiornato (44), pacchetto dell'app protetto da manomissioni, eseguibile e finestra blindati. [Dettagli](#sicurezza). |
 
