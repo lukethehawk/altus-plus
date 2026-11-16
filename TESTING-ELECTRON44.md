@@ -184,6 +184,12 @@ fails it uploads no installer.
    started into the tray (`--hidden`):
    - a notification from Beta is real, titled "Beta · …", and its
      permission is granted; Gamma's is replaced by the silent stand-in;
+   - permissions come from the main process: a location request from Alfa
+     is refused. With the window shown, turning Beta's Notifications and
+     Microphone and Camera off in the saved tab list makes Beta report and
+     get "denied" for both at once (`Notification.permission`, the
+     notification request, the microphone check); turned on again, they
+     are granted again;
    - a tone started in Alfa and in Beta keeps running and Chromium reports
      both as playing, so neither was stopped or suspended. No tab is muted,
      which is checked on its own: Chromium reports a muted tab as playing

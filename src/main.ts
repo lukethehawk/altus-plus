@@ -86,6 +86,7 @@ import {
   setupAutoUpdater,
 } from "./updater";
 import { isAltusPartition, isTrustedWhatsAppURL, getSafeExternalHttpURL } from "./utils/security";
+import { allowPermissionCheck, allowPermissionRequest } from "./utils/permissions";
 import {
   PROTOCOL_ARGS,
   WHATSAPP_PROTOCOL,
@@ -446,6 +447,8 @@ function createWindow() {
       webPreferences.nodeIntegrationInSubFrames = false;
       webPreferences.contextIsolation = true;
       webPreferences.sandbox = true;
+      // Before the page loads, not once it has (the window used to ask).
+      setUpTabPermissions(params.partition);
     }
   );
   // The app UI is a local page: it never navigates away or opens windows.
@@ -875,17 +878,33 @@ function toggleTray(mainWindow: BrowserWindow, enabled: boolean) {
   });
 }
 
-type PartitionID = string;
+/** Partitions whose permission handlers are set (once per session). */
+const partitionsWithPermissionHandlers = new Set<string>();
+
 /**
- * For every permission that we want to handle, we keep track of the partitions
- * where it is enabled.
+ * Sets a tab's permission handlers when its webview attaches, before
+ * WhatsApp loads: Electron grants every request a session has no handler
+ * for. Each answer reads the tab's switches as saved, so turning one on or
+ * off applies at once.
  */
-const sessionPermissions = {
-  notifications: new Set<PartitionID>(),
-  media: new Set<PartitionID>(),
-};
-type SessionPermissionKey = keyof typeof sessionPermissions;
-const HandledPermissions = Object.keys(sessionPermissions);
+function setUpTabPermissions(partition: string) {
+  if (partitionsWithPermissionHandlers.has(partition)) return;
+  partitionsWithPermissionHandlers.add(partition);
+  const switchesOf = () => {
+    const tabs = electronTabStore.get("tabs");
+    return Array.isArray(tabs) ? tabs.find((tab) => `persist:${tab?.id}` === partition)?.config : undefined;
+  };
+  const tabSession = session.fromPartition(partition);
+  tabSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    // The frame asking, so that a page embedded in WhatsApp gets nothing.
+    const fromWhatsApp = isTrustedWhatsAppURL(details.requestingUrl || contents.getURL());
+    callback(allowPermissionRequest(permission, fromWhatsApp, switchesOf()));
+  });
+  tabSession.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
+    const fromWhatsApp = isTrustedWhatsAppURL(requestingOrigin || contents?.getURL() || "");
+    return allowPermissionCheck(permission, fromWhatsApp, switchesOf());
+  });
+}
 
 function addIPCHandlers(mainWindow: BrowserWindow) {
   // Every invoke channel serves the app's own UI. WhatsApp pages only use the
@@ -994,50 +1013,6 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     }
   );
 
-  handle("init-permission-handler", (event, partitionId: unknown) => {
-    if (event.sender !== mainWindow.webContents || !isAltusPartition(partitionId)) {
-      throw new Error("Unauthorized session partition");
-    }
-    session
-      .fromPartition(partitionId)
-      .setPermissionRequestHandler((requestingContents, permission, callback) => {
-        if (!isTrustedWhatsAppURL(requestingContents.getURL()) || !HandledPermissions.includes(permission)) {
-          callback(false);
-          return;
-        }
-        const isEnabled =
-          sessionPermissions[permission as SessionPermissionKey].has(partitionId);
-        callback(isEnabled);
-      });
-  });
-
-  handle(
-    "toggle-notifications",
-    (event, enabled: boolean, partitionId: string) => {
-      if (event.sender !== mainWindow.webContents || !isAltusPartition(partitionId) || typeof enabled !== "boolean") {
-        throw new Error("Invalid notification permission update");
-      }
-      if (enabled) {
-        sessionPermissions.notifications.add(partitionId);
-      } else {
-        sessionPermissions.notifications.delete(partitionId);
-      }
-    }
-  );
-
-  handle(
-    "toggle-media-permission",
-    (event, enabled: boolean, partitionId: string) => {
-      if (event.sender !== mainWindow.webContents || !isAltusPartition(partitionId) || typeof enabled !== "boolean") {
-        throw new Error("Invalid media permission update");
-      }
-      if (enabled) {
-        sessionPermissions.media.add(partitionId);
-      } else {
-        sessionPermissions.media.delete(partitionId);
-      }
-    }
-  );
 
   ipcMain.on("open-link", (event, rawURL: unknown) => {
     if (event.sender.getType() !== "webview" || !isTrustedWhatsAppURL(event.sender.getURL())) return;
