@@ -34,26 +34,8 @@ const WebView: Component<{ tab: Tab }> = (props) => {
     webviewRef.setAudioMuted(!props.tab.config.sound);
   });
 
-  createEffect(() => {
-    if (!webviewRef) return;
-    if (!didStopLoading()) return;
-
-    window.initPermissionHandler(`persist:${props.tab.id}`);
-  });
-
-  createEffect(() => {
-    if (!webviewRef) return;
-    if (!didStopLoading()) return;
-
-    window.toggleNotifications(
-      props.tab.config.notifications,
-      `persist:${props.tab.id}`
-    );
-    window.toggleMediaPermission(
-      props.tab.config.media,
-      `persist:${props.tab.id}`
-    );
-  });
+  // Notifications and the microphone and camera follow the tab's switches
+  // in the main process (setUpTabPermissions), from before the page loads.
 
   createEffect(() => {
     if (!webviewRef) return;

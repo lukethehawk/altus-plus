@@ -21,6 +21,10 @@
 // 5. tabs in the background, also with the whole app in the tray, keep
 //    playing sound (also after switching tab) and show notifications labelled
 //    with their account, and a muted account's notification is suppressed.
+//    Permissions come from the main process: a location request is refused,
+//    and turning a tab's Notifications and Microphone and Camera off (in the
+//    saved tab list) makes it report and get "denied" at once, until they
+//    are turned on again.
 //    Tabs move by dragging only once "Allow Moving Tabs" is on, and
 //    Help → Resource Usage lists every account and recognises every process.
 //    A whatsapp:// link reaching the running app asks which account opens it
@@ -728,6 +732,17 @@ const NOTIFY = `(async () => {
   return { permission, requested, title: notification.title, real, event };
 })()`;
 
+/** What a tab is granted: the notification check and request, the microphone check. */
+const PERMISSION_STATE = `(async () => ({
+  permission: Notification.permission,
+  requested: await Notification.requestPermission(),
+  microphone: (await navigator.permissions.query({ name: "microphone" })).state,
+}))()`;
+
+/** A location request: 1 is PERMISSION_DENIED. */
+const GEOLOCATION = `new Promise((resolve) => navigator.geolocation.getCurrentPosition(
+  () => resolve("position"), (error) => resolve(error.code), { timeout: 5000 }))`;
+
 const webviewCall = (id, method) => `document.getElementById(${JSON.stringify(`webview-${id}`)}).${method}()`;
 
 /**
@@ -899,6 +914,27 @@ function exerciseBackgroundTabs(run, audio, profile) {
       if (muted.real) failures.push("Gamma: muted, but a real notification was created");
       if (muted.title !== "Smoke") failures.push(`Gamma: stand-in title is "${muted.title}"`);
       if (muted.event !== "close") failures.push(`Gamma: the stand-in did not report itself closed (${muted.event})`);
+
+      // Permissions come from the main process and the tab's saved switches:
+      // anything else is refused, and a switch turned off while the app runs
+      // applies at once, to requests and to checks alike.
+      const location = await pages[ALFA.id].evaluate(GEOLOCATION);
+      if (location !== 1) failures.push(`Alfa: a location request was not refused (${location})`);
+      if (run === "window shown") {
+        const setBetaSwitches = (switches) => cdp.evaluate(`window.electronTabStore.set("tabs", ${JSON.stringify(
+          BACKGROUND_TABS.map((tab) => (tab.id === BETA.id ? { ...tab, config: { ...tab.config, ...switches } } : tab))
+        )})`);
+        await setBetaSwitches({ notifications: false, media: false });
+        const off = await pages[BETA.id].evaluate(PERMISSION_STATE);
+        if (off.permission !== "denied" || off.requested !== "denied" || off.microphone !== "denied") {
+          failures.push(`Beta with Notifications and Microphone and Camera off: ${JSON.stringify(off)}`);
+        }
+        await setBetaSwitches({});
+        const on = await pages[BETA.id].evaluate(PERMISSION_STATE);
+        if (on.permission !== "granted" || on.requested !== "granted" || on.microphone !== "granted") {
+          failures.push(`Beta with the switches on again: ${JSON.stringify(on)}`);
+        }
+      }
 
       for (const tab of [ALFA, BETA]) {
         const tone = await pages[tab.id].evaluate(START_TONE);
@@ -1525,7 +1561,7 @@ const checks = [
   ["2. Modified app.asar is refused", checkTamperedAsar],
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors; started by a whatsapp:// link", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account", checkStartInTray],
-  ["5. Three accounts: background sound and notifications, muted account, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
+  ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
   ["6. Resource test: restart into it, record three accounts, summary, normal restart", checkResourceTest],
 ];
 if (runInstaller) {
