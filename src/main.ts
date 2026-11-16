@@ -285,9 +285,10 @@ type AutostartRecord = {
  * Writes or removes the autostart entry when it differs from the setting.
  * Checking goes through Electron, which reads the registry itself; reg.exe
  * (through auto-launch) only runs when something has to change, since
- * starting it blocks the app until Windows has launched it.
+ * starting it blocks the app until Windows has launched it. Settles once
+ * every reg.exe it started has finished.
  */
-function updateAutostart() {
+async function updateAutostart(): Promise<void> {
   const wanted = getSettingWithDefault("autoLaunch");
   const execPath = process.execPath;
   const command = autostartCommand(execPath);
@@ -318,35 +319,60 @@ function updateAutostart() {
     }
   };
 
+  const pending: Promise<void>[] = [];
   if (change === "none") {
     console.info(`Autostart entry unchanged (${wanted ? "set" : "absent"})`);
   } else {
     // isHidden adds AUTOSTART_FLAG, so the app knows it started with Windows.
     const autoLauncher = new AutoLaunch({ name: APP_NAME, isHidden: true });
-    (change === "enable" ? autoLauncher.enable() : autoLauncher.disable())
-      .then(() => {
-        remember({ written: change === "enable" ? command : null });
-        console.info(`Autostart entry ${change === "enable" ? "set" : "removed"}`);
-      })
-      .catch((error) => console.warn("Autostart update failed", error));
+    pending.push(
+      (change === "enable" ? autoLauncher.enable() : autoLauncher.disable())
+        .then(() => {
+          remember({ written: change === "enable" ? command : null });
+          console.info(`Autostart entry ${change === "enable" ? "set" : "removed"}`);
+        })
+        .catch((error) => console.warn("Autostart update failed", error))
+    );
   }
 
   // The test builds registered autostart under their own name; drop that
   // entry once so the old executable is not launched next to this one.
   // Without the path, auto-launch would remove this app's entry ("Altus +")
   // instead. It may point anywhere, so only reg.exe can remove it.
-  if (legacyRemoved) return;
-  new AutoLaunch({
-    name: LEGACY_TEST_BUILD_NAME,
-    path: autostartPathFor(LEGACY_TEST_BUILD_NAME, execPath),
-  })
-    .disable()
-    .then(
-      () => console.info("Autostart entry of the old test builds cleared"),
-      // Also when there was none: reg.exe reports that in the system's language.
-      () => undefined
-    )
-    .then(() => remember({ legacyRemoved: true }));
+  if (!legacyRemoved) {
+    pending.push(
+      new AutoLaunch({
+        name: LEGACY_TEST_BUILD_NAME,
+        path: autostartPathFor(LEGACY_TEST_BUILD_NAME, execPath),
+      })
+        .disable()
+        .then(
+          () => console.info("Autostart entry of the old test builds cleared"),
+          // Also when there was none: reg.exe reports that in the system's language.
+          () => undefined
+        )
+        .then(() => remember({ legacyRemoved: true }))
+    );
+  }
+  await Promise.all(pending);
+}
+
+let autostartUpdates: Promise<void> | undefined;
+
+/**
+ * Brings the autostart entry in line with the setting: at startup, and as
+ * soon as "Launch at system startup" changes, so turning it off before
+ * shutting down already keeps the app from starting with Windows. An update
+ * waits for the one still running, so two quick changes never run reg.exe at
+ * the same time; each reads the setting when it starts, so the entry ends up
+ * as the last change left it. A run on an explicit profile (smoke tests)
+ * leaves the entry alone: it belongs to the installed app.
+ */
+function queueAutostartUpdate() {
+  if (hasExplicitProfileDirectory()) return;
+  const update = () => updateAutostart().catch((error) => console.warn("Autostart update failed", error));
+  // The first runs at once, so startup still starts reg.exe before the window.
+  autostartUpdates = autostartUpdates ? autostartUpdates.then(update) : update();
 }
 
 // Recently completed downloads by id: the UI asks to reveal an id, so a file
@@ -567,7 +593,7 @@ if (!singleInstanceLock) {
 
     // A smoke-test run on a throwaway profile must not rewrite the autostart
     // entry of the installed app, which shares the same name.
-    if (!hasExplicitProfileDirectory()) updateAutostart();
+    queueAutostartUpdate();
     startupTimes.autostartCheckedAt = startupMoment("autostart");
 
     const mainWindow = createWindow();
@@ -969,6 +995,10 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
       } else if (key === "registerProtocol") {
         electronSettingsStore.set(key, { value });
         updateProtocolRegistration();
+        return;
+      } else if (key === "autoLaunch") {
+        electronSettingsStore.set(key, { value });
+        queueAutostartUpdate();
         return;
       }
       return electronSettingsStore.set(key, { value });

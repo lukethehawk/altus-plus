@@ -43,7 +43,9 @@
 //    UniGetUI offered the original's updates as updates of Altus +);
 //    with "Open whatsapp:// links" on, the app registers for the links, a
 //    link started through Windows asks which account opens it, and turning
-//    the setting off removes the registration;
+//    the setting off removes the registration; turning "Launch at system
+//    startup" off and on removes and writes the autostart entry at once,
+//    also after quick changes in a row;
 // 8. reinstalling never migrates again or touches the Altus + profile, and
 //    leaves one entry in the installed programs list and the link
 //    registration;
@@ -1355,6 +1357,43 @@ async function checkProgramsEntry() {
 const installedLinkCommand = () => `"${install.exe}" -- "%1"`;
 const isInstalledLinkCommand = (command) => command?.toLowerCase() === installedLinkCommand().toLowerCase();
 
+/** What the installed app's autostart entry runs: the flag "Start in tray with Windows" relies on. */
+const installedAutostartEntry = () => `"${install.exe}" --hidden`;
+
+/**
+ * Settings → "Launch at system startup" on the running installed app: off
+ * removes the entry and on writes it again, without a restart (it used to
+ * change only at the app's next start). Quick changes in a row run reg.exe
+ * one at a time and leave the entry as the last one says. Left on.
+ */
+async function checkAutostartSwitch(cdp, app) {
+  const entry = async () => (await readRunEntry(packageJson.productName)).value?.trim();
+  const isInstalledEntry = async () => (await entry())?.toLowerCase() === installedAutostartEntry().toLowerCase();
+  const failures = [];
+  const setAutoLaunch = (values) =>
+    cdp.evaluate(`Promise.all(${JSON.stringify(values)}.map((value) => window.electronSettingsStore.setSetting("autoLaunch", value)))`);
+  try {
+    if (!(await isInstalledEntry())) return [`autostart switch: the entry is ${(await entry()) ?? "missing"} before the check`];
+    const logBefore = app.output.length;
+    await setAutoLaunch([false]);
+    await waitFor("the autostart entry to be removed when the setting is turned off", 15_000, async () => !(await entry()));
+    await setAutoLaunch([true]);
+    await waitFor("the autostart entry to return when the setting is turned on", 15_000, isInstalledEntry);
+    await setAutoLaunch([false, true, false, true, false]);
+    await waitFor("the entry to be removed after quick changes ending off", 20_000, async () => !(await entry()));
+    // Nothing still queued may write it again.
+    await sleep(5_000);
+    if (await entry()) failures.push("after quick changes ending off, the autostart entry came back");
+    await setAutoLaunch([true]);
+    await waitFor("the autostart entry to return at the end", 15_000, isInstalledEntry);
+    const failed = app.output.slice(logBefore).match(/Autostart update failed[^\r\n]*/);
+    if (failed) failures.push(`app log: ${failed[0].trim()}`);
+  } catch (error) {
+    failures.push(`autostart switch: ${error.message}`);
+  }
+  return failures;
+}
+
 /**
  * Settings → "Open whatsapp:// links" on the installed app: on, the app
  * registers for the links, and a link started through Windows (as a browser
@@ -1392,6 +1431,8 @@ async function checkLinkRegistration() {
     await waitFor("the registration to be removed when the setting is off", 15_000, async () => !(await readProtocolCommand()));
     await cdp.evaluate(`window.electronSettingsStore.setSetting("registerProtocol", true)`);
     await waitFor("the registration to return when the setting is on", 15_000, async () => isInstalledLinkCommand(await readProtocolCommand()));
+
+    failures.push(...(await checkAutostartSwitch(cdp, app)));
   } catch (error) {
     failures.push(`whatsapp:// links: ${error.message}`);
   } finally {
@@ -1485,7 +1526,7 @@ async function checkInstallReplacingOriginal() {
   // The migrated settings turn autostart on: the entry must start the
   // installed exe with the flag "Start in tray with Windows" relies on.
   const { value: entry, error } = await readRunEntry(packageJson.productName);
-  const expectedEntry = `"${install.exe}" --hidden`;
+  const expectedEntry = installedAutostartEntry();
   const legacy = await readRunEntry(legacyName);
   if (legacy.value) result.failures.push(`the "${legacyName}" autostart entry was not removed`);
   if (entry?.trim().toLowerCase() !== expectedEntry.toLowerCase()) {
@@ -1566,7 +1607,7 @@ const checks = [
 ];
 if (runInstaller) {
   checks.push(
-    ["7. Installer replaces the original Altus; app opens its tabs and settings; autostart written only when needed; whatsapp:// links registered while on", checkInstallReplacingOriginal],
+    ["7. Installer replaces the original Altus; app opens its tabs and settings; autostart written only when needed and follows its setting at once; whatsapp:// links registered while on", checkInstallReplacingOriginal],
     ["8. Reinstall leaves the profile, the original data and the link registration alone", checkReinstall],
     ["9. Uninstall removes the program and its link registration, keeps the profile", checkUninstall],
   );
