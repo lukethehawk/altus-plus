@@ -71,7 +71,8 @@ logged in.
    renderer processes. The affected tab (or the whole window, if that
    renderer was the app UI) reloads within a few seconds on its own and stays
    logged in; other accounts are not reloaded.
-6. Autostart on/off in settings still applies after a restart. With
+6. Autostart on/off in settings applies at once: the entry appears in or
+   leaves Task Manager → Startup apps without restarting Altus +. With
    **Start in tray with Windows** also on, signing in to Windows shows only
    the tray icon. A message still notifies, and the tray icon or the
    notification opens the window with the accounts already connected.
@@ -230,7 +231,10 @@ fails it uploads no installer.
    - started again, the app leaves the entry alone without running
      `reg.exe` ("Autostart entry unchanged (set)" in its log, `autostart.json`
      in the profile records what it wrote); after the entry is deleted, the
-     next start writes it again.
+     next start writes it again;
+   - turning "Launch at system startup" off and on in the running app
+     removes and writes the entry at once, also after quick changes in a
+     row.
 8. A reinstall changes neither the Altus + profile nor the original data.
 9. Uninstalling removes the program and keeps the profile.
 
