@@ -12,7 +12,7 @@
 
 !define WHATSAPP_PROTOCOL_KEY "Software\Classes\whatsapp"
 
-!macro customUnInstall
+!macro WHATSAPP_LINKS_UNINSTALL
   ${IfNot} ${isUpdated}
     Push $0
     Push $1

@@ -65,7 +65,7 @@ import {
 } from "./utils/startup";
 import { attachEnterKeys } from "./utils/keyboard";
 import { isMuteActive } from "./utils/notifications";
-import { formatTrayTooltip } from "./utils/tray";
+import { formatTrayTooltip, totalUnread } from "./utils/tray";
 import { groupProcessUsage } from "./utils/resources";
 import {
   RESOURCE_TEST_FLAG,
@@ -87,6 +87,7 @@ import {
 } from "./updater";
 import { isAltusPartition, isTrustedWhatsAppURL, getSafeExternalHttpURL } from "./utils/security";
 import { allowPermissionCheck, allowPermissionRequest } from "./utils/permissions";
+import { isFullFolderPath } from "./utils/downloads";
 import {
   PROTOCOL_ARGS,
   WHATSAPP_PROTOCOL,
@@ -596,16 +597,21 @@ if (!singleInstanceLock) {
     queueAutostartUpdate();
     startupTimes.autostartCheckedAt = startupMoment("autostart");
 
-    const mainWindow = createWindow();
-    startupTimes.windowCreatedAt = startupMoment("window");
-    if (resourceTestMode) startResourceTest(mainWindow);
-
-    contextMenu();
-
+    // Before any tab session exists: electron-dl only handles the sessions
+    // created after it (session-created), and the resource test's first
+    // sample creates every tab's session right after the window. Its
+    // downloads used Electron's default handling (no folder, no "Attachment
+    // saved"). onCompleted runs after a download, once mainWindow exists.
+    // A folder that is not a full path would make electron-dl throw in every
+    // download; Settings warns under the field, the default folder is used.
     const defaultDownloadDir = getSettingWithDefault("defaultDownloadDir");
+    const downloadDirectory = isFullFolderPath(defaultDownloadDir, process.platform) ? defaultDownloadDir : undefined;
+    if (defaultDownloadDir && !downloadDirectory) {
+      console.warn("The download folder in Settings is not a full path; downloads use the default folder");
+    }
     electronDl({
       saveAs: getSettingWithDefault("showSaveDialog"),
-      directory: defaultDownloadDir ? defaultDownloadDir : undefined,
+      directory: downloadDirectory,
       onCompleted: (file) => {
         const id = nextDownloadId++;
         completedDownloads.set(id, file.path);
@@ -619,6 +625,12 @@ if (!singleInstanceLock) {
         });
       },
     });
+
+    const mainWindow = createWindow();
+    startupTimes.windowCreatedAt = startupMoment("window");
+    if (resourceTestMode) startResourceTest(mainWindow);
+
+    contextMenu();
 
     initializeI18N(mainWindow).then(() => {
       toggleTray(mainWindow, getSettingWithDefault("trayIcon"));
@@ -889,7 +901,8 @@ function toggleTray(mainWindow: BrowserWindow, enabled: boolean) {
       : trayIcon
   );
   trayTooltip = "";
-  updateTrayTooltip();
+  // A new icon starts without the badge.
+  updateUnreadIndicators(mainWindow);
   // A timed mute may have ended since the last update.
   tray.on("mouse-enter", () => updateTrayTooltip());
   tray.setContextMenu(getLocalizedTrayMenu());
@@ -1000,6 +1013,10 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
         electronSettingsStore.set(key, { value });
         queueAutostartUpdate();
         return;
+      } else if (key === "notificationBadge") {
+        electronSettingsStore.set(key, { value });
+        updateUnreadIndicators(mainWindow);
+        return;
       }
       return electronSettingsStore.set(key, { value });
     }
@@ -1017,8 +1034,9 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
       if (key === "tabs" && value !== undefined) recordClosedTab(value);
       if (value === undefined) electronTabStore.delete(key);
       else electronTabStore.set(key, value);
-      // Names, order and mutes of the accounts.
-      if (key === "tabs") updateTrayTooltip();
+      // Names, order and mutes of the accounts; a closed tab's chats no
+      // longer count.
+      if (key === "tabs") updateUnreadIndicators(mainWindow);
     }
   );
 
@@ -1164,33 +1182,31 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     unreadByTab.set(tabId, messageCount as number);
     resourceTest?.accountLoaded(tabId, tabs.find((tab) => tab.id === tabId)?.name ?? "");
     mainWindow.webContents.send("message-count", { tabId, messageCount });
-    updateTrayTooltip(tabs);
-    if (!getSettingWithDefault("notificationBadge")) {
-      return;
-    }
-    const totalUnread = [...unreadByTab.values()].reduce((sum, count) => sum + count, 0);
-    if (totalUnread > 0) {
-      switch (process.platform) {
-        case "darwin":
-          app.dock?.setBadge("·");
-          break;
-        default:
-          if (tray) tray.setImage(trayNotificationIcon);
-          mainWindow.setOverlayIcon(mainNotificationIcon, "Notification badge");
-          break;
-      }
-    } else {
-      switch (process.platform) {
-        case "darwin":
-          app.dock?.setBadge("");
-          break;
-        default:
-          if (tray) tray.setImage(trayIcon);
-          mainWindow.setOverlayIcon(null, "Notification badge empty");
-          break;
-      }
-    }
+    updateUnreadIndicators(mainWindow, tabs);
   });
+}
+
+/**
+ * The tray tooltip and the unread badge (tray icon and taskbar overlay),
+ * from the counts of the tabs that still exist. Called when a count
+ * changes, and also when a tab closes, the tray icon is recreated or the
+ * badge setting changes: before, the badge stayed lit after closing the
+ * only tab with unread chats, and a recreated tray icon lost it.
+ */
+function updateUnreadIndicators(mainWindow: BrowserWindow, tabs: Tab[] = electronTabStore.get("tabs")) {
+  if (mainWindow.isDestroyed()) return;
+  const tabIds = new Set(tabs.map((tab) => tab.id));
+  for (const id of unreadByTab.keys()) {
+    if (!tabIds.has(id)) unreadByTab.delete(id);
+  }
+  updateTrayTooltip(tabs);
+  const lit = getSettingWithDefault("notificationBadge") && totalUnread(unreadByTab, tabIds) > 0;
+  if (process.platform === "darwin") {
+    app.dock?.setBadge(lit ? "·" : "");
+    return;
+  }
+  if (tray && !tray.isDestroyed()) tray.setImage(lit ? trayNotificationIcon : trayIcon);
+  mainWindow.setOverlayIcon(lit ? mainNotificationIcon : null, lit ? "Notification badge" : "Notification badge empty");
 }
 
 type CloneableMenuItem = Omit<MenuItem, "menu" | "submenu" | "click"> & {

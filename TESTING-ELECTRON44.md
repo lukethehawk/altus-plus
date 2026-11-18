@@ -83,7 +83,9 @@ logged in.
 7. **Download notice:** download an attachment; "Attachment saved / Show in
    folder" appears for a few seconds and the button opens Explorer with the
    file selected. With "Show save dialog" on (the default) it appears after
-   the file is saved.
+   the file is saved. A download folder that is not a full path (such as
+   `Downloads`) shows a warning under the field; after a restart attachments
+   still download, to the default folder, with no error box.
 8. **Multi-account notifications:** a message to a background account shows
    "<tab name> · <sender>" as title. Clicking it brings Altus forward (also
    from the tray), switches to that account and WhatsApp opens the chat.
@@ -124,7 +126,10 @@ logged in.
     account in tab order, "<tab name>: <unread chats>", the same number as
     the tab badge. A muted account ends with "(muted)" ("(silenziato)" in
     Italian) until the mute expires. Renaming, reordering or closing a tab
-    and switching language update it.
+    and switching language update it. Closing the only tab with unread
+    chats also turns off the red dot on the tray icon and taskbar; so does
+    turning off the badge setting, and turning the tray icon off and on
+    keeps the dot while chats are unread.
 15. **Moving tabs:** by default dragging a tab does nothing. Tab → Allow
     Moving Tabs ticks the item; then dragging a tab onto another shows a
     blue line on the side it will land and moves it there on release, and
@@ -217,7 +222,10 @@ fails it uploads no installer.
    "window created", from "Electron ready" on with the main process's CPU
    time), "window shown", a
    "WhatsApp page loaded" line, samples for each account and the main
-   process's JavaScript memory on its rows. Help → End Resource Test writes
+   process's JavaScript memory on its rows. A file downloaded in a tab
+   during the test lands in the download folder from Settings and shows
+   "Attachment saved" (the test's sessions used to miss the download
+   handling). Help → End Resource Test writes
    the summary (listing the three accounts, the startup times and the main
    process, and the longest startup step), closes the CSV with "test ended",
    opens Explorer there and restarts the app normally. The restarted
@@ -235,8 +243,10 @@ fails it uploads no installer.
    - turning "Launch at system startup" off and on in the running app
      removes and writes the entry at once, also after quick changes in a
      row.
-8. A reinstall changes neither the Altus + profile nor the original data.
-9. Uninstalling removes the program and keeps the profile.
+8. A reinstall changes neither the Altus + profile nor the original data,
+   and keeps the link registration and the autostart entry.
+9. Uninstalling removes the program, its link registration and its
+   autostart entry, and keeps the profile.
 
 Failures attach logs and screenshots (`smoke-artifacts`) to the run. Checks
 7-9 install and uninstall for real, so they only run on GitHub's throwaway

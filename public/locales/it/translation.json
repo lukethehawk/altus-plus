@@ -85,6 +85,7 @@
   "showSaveDialogDescription": "Chiede dove salvare ogni file prima di scaricarlo. (NOTA: serve un riavvio per applicare la modifica.)",
   "defaultDownloadDir": "Cartella di download predefinita",
   "defaultDownloadDirDescription": "La cartella in cui salvare i file scaricati. (NOTA: serve un percorso assoluto)",
+  "defaultDownloadDirNotFull": "Non è un percorso completo (come C:\\Users\\tu\\Downloads): i download usano la cartella predefinita.",
   "addTheme": "Aggiungi tema",
   "updateThemes": "Aggiorna temi",
   "deleteTheme": "Elimina tema",

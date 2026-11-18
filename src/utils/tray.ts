@@ -48,3 +48,16 @@ function cleanAccountName(name: string): string {
   if (characters.length <= MAX_NAME_LENGTH) return characters.join("");
   return `${characters.slice(0, MAX_NAME_LENGTH - 1).join("").trimEnd()}…`;
 }
+
+/**
+ * Unread chats of the accounts that still exist, for the unread badge: a
+ * closed tab's last count no longer counts. Invalid counts count as zero.
+ */
+export function totalUnread(unreadByTab: ReadonlyMap<string, number>, tabIds: Iterable<string>): number {
+  let total = 0;
+  for (const id of new Set(tabIds)) {
+    const unread = unreadByTab.get(id);
+    if (Number.isSafeInteger(unread) && (unread as number) > 0) total += unread as number;
+  }
+  return total;
+}

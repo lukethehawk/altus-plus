@@ -85,6 +85,7 @@
   "showSaveDialogDescription": "Whether to ask where to save each file before downloading. (NOTE: Requires a restart for changes to apply.)",
   "defaultDownloadDir": "Default Download Directory",
   "defaultDownloadDirDescription": "The directory where you want to save the downloads. (NOTE: Requires an absolute path)",
+  "defaultDownloadDirNotFull": "Not a full path (such as C:\\Users\\you\\Downloads): downloads use the default folder.",
   "addTheme": "Add Theme",
   "updateThemes": "Update Themes",
   "deleteTheme": "Delete Theme",
