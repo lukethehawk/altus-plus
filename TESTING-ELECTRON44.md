@@ -235,8 +235,10 @@ fails it uploads no installer.
    - turning "Launch at system startup" off and on in the running app
      removes and writes the entry at once, also after quick changes in a
      row.
-8. A reinstall changes neither the Altus + profile nor the original data.
-9. Uninstalling removes the program and keeps the profile.
+8. A reinstall changes neither the Altus + profile nor the original data,
+   and keeps the link registration and the autostart entry.
+9. Uninstalling removes the program, its link registration and its
+   autostart entry, and keeps the profile.
 
 Failures attach logs and screenshots (`smoke-artifacts`) to the run. Checks
 7-9 install and uninstall for real, so they only run on GitHub's throwaway

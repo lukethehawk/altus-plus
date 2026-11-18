@@ -47,10 +47,10 @@
 //    startup" off and on removes and writes the autostart entry at once,
 //    also after quick changes in a row;
 // 8. reinstalling never migrates again or touches the Altus + profile, and
-//    leaves one entry in the installed programs list and the link
-//    registration;
-// 9. uninstalling removes the program and its link registration and keeps
-//    the profile.
+//    leaves one entry in the installed programs list, the link
+//    registration and the autostart entry;
+// 9. uninstalling removes the program, its link registration and its
+//    autostart entry, and keeps the profile.
 //
 // Checks 7-9 install Altus +, write %APPDATA% and uninstall, so they only run
 // on a GitHub-hosted runner, which is discarded afterwards. The app is
@@ -1563,6 +1563,10 @@ async function checkReinstall() {
   failures.push(...(await checkProgramsEntry()));
   const command = await readProtocolCommand();
   if (!isInstalledLinkCommand(command)) failures.push(`after reinstalling, the whatsapp:// registration is ${command ?? "gone"}`);
+  const { value: entry } = await readRunEntry(packageJson.productName);
+  if (entry?.trim().toLowerCase() !== installedAutostartEntry().toLowerCase()) {
+    failures.push(`after reinstalling, the autostart entry is ${entry ? `'${entry}'` : "gone"}`);
+  }
   return { failures, notes: [] };
 }
 
@@ -1572,6 +1576,8 @@ async function checkUninstall() {
   if (!uninstaller) return { failures: [`no uninstaller in ${programDir}`], notes: [] };
   const profile = path.join(APPDATA, PROFILE_FOLDER);
   const profileExisted = fs.existsSync(path.join(profile, "tabs.json"));
+  // Check 7 leaves autostart on.
+  const entryBefore = (await readRunEntry(packageJson.productName)).value;
   // Without _?= the uninstaller copies itself to %TEMP% and returns at once.
   spawnSync(path.join(programDir, uninstaller), ["/currentuser", "/S"], { timeout: 120_000 });
   const failures = [];
@@ -1584,6 +1590,9 @@ async function checkUninstall() {
   else if (!fs.existsSync(path.join(profile, "tabs.json"))) failures.push("the uninstaller removed the Altus + profile");
   const command = await readProtocolCommand();
   if (command) failures.push(`the whatsapp:// registration outlived the uninstall: ${command}`);
+  if (!entryBefore) failures.push("no autostart entry to check before uninstalling: check 7 should leave it on");
+  const entryAfter = (await readRunEntry(packageJson.productName)).value;
+  if (entryAfter) failures.push(`the autostart entry outlived the uninstall: ${entryAfter}`);
   return { failures, notes: [] };
 }
 
@@ -1608,8 +1617,8 @@ const checks = [
 if (runInstaller) {
   checks.push(
     ["7. Installer replaces the original Altus; app opens its tabs and settings; autostart written only when needed and follows its setting at once; whatsapp:// links registered while on", checkInstallReplacingOriginal],
-    ["8. Reinstall leaves the profile, the original data and the link registration alone", checkReinstall],
-    ["9. Uninstall removes the program and its link registration, keeps the profile", checkUninstall],
+    ["8. Reinstall leaves the profile, the original data, the link registration and autostart alone", checkReinstall],
+    ["9. Uninstall removes the program, its link registration and its autostart entry, keeps the profile", checkUninstall],
   );
 }
 

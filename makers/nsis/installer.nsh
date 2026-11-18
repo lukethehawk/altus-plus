@@ -8,6 +8,15 @@
 !include "${__FILEDIR__}\replaceAltus.nsh"
 ; Uninstalling removes the app's whatsapp:// registration.
 !include "${__FILEDIR__}\whatsappLinks.nsh"
+; Uninstalling removes the app's autostart entry.
+!include "${__FILEDIR__}\autostart.nsh"
+
+; electron-builder allows one customUnInstall; it also runs on updates and
+; reinstalls (--updated), which each part checks itself.
+!macro customUnInstall
+  !insertmacro WHATSAPP_LINKS_UNINSTALL
+  !insertmacro AUTOSTART_UNINSTALL
+!macroend
 
 ; electron-builder allows one customInit; it runs in .onInit, after the
 ; install mode (current user / all users) is set and before anything is

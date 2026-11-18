@@ -45,3 +45,30 @@ test("uninstalling removes the whatsapp:// registration the app writes", async (
   assert.match(script, /\$\{IfNot\} \$\{isUpdated\}/);
   assert.ok(read("makers/nsis/installer.nsh").includes(`!include "\${__FILEDIR__}\\whatsappLinks.nsh"`));
 });
+
+test("uninstalling removes the autostart entry the app writes", async () => {
+  const { autostartCommand, autostartEntryName } = await import("../src/utils/startup.ts");
+  const script = read("makers/nsis/autostart.nsh");
+  assert.ok(script.includes(`!define AUTOSTART_RUN_KEY "Software\\Microsoft\\Windows\\CurrentVersion\\Run"`));
+  // The value is named after the exe without ".exe", and its command starts
+  // with the quoted exe path, which the uninstaller matches.
+  const exe = "C:\\Users\\someone\\AppData\\Local\\Programs\\Altus +\\Altus +.exe";
+  assert.equal(autostartEntryName(exe), "Altus +");
+  assert.ok(autostartCommand(exe).startsWith(`"${exe}" `));
+  assert.ok(script.includes(`StrCpy $3 "\${APP_EXECUTABLE_FILENAME}" -4`));
+  assert.ok(script.includes(`StrCpy $1 '"$INSTDIR\\\${APP_EXECUTABLE_FILENAME}"'`));
+  assert.match(script, /DeleteRegValue HKCU "\$\{AUTOSTART_RUN_KEY\}" \$3/);
+  assert.match(script, /\$\{IfNot\} \$\{isUpdated\}/);
+});
+
+test("the one customUnInstall runs every uninstall step", () => {
+  const scripts = fs.readdirSync(path.join(root, "makers/nsis")).filter((file) => file.endsWith(".nsh"));
+  const defining = scripts.filter((file) => /^!macro customUnInstall\b/m.test(read(`makers/nsis/${file}`)));
+  assert.deepEqual(defining, ["installer.nsh"]);
+  const installer = read("makers/nsis/installer.nsh");
+  for (const [file, macro] of [["whatsappLinks.nsh", "WHATSAPP_LINKS_UNINSTALL"], ["autostart.nsh", "AUTOSTART_UNINSTALL"]]) {
+    assert.ok(installer.includes(`!include "\${__FILEDIR__}\\${file}"`), file);
+    assert.match(read(`makers/nsis/${file}`), new RegExp(`^!macro ${macro}\\b`, "m"), macro);
+    assert.match(installer, new RegExp(`!macro customUnInstall[\\s\\S]*!insertmacro ${macro}[\\s\\S]*!macroend`), macro);
+  }
+});
