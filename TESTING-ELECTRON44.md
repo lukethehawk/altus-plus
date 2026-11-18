@@ -83,7 +83,9 @@ logged in.
 7. **Download notice:** download an attachment; "Attachment saved / Show in
    folder" appears for a few seconds and the button opens Explorer with the
    file selected. With "Show save dialog" on (the default) it appears after
-   the file is saved.
+   the file is saved. A download folder that is not a full path (such as
+   `Downloads`) shows a warning under the field; after a restart attachments
+   still download, to the default folder, with no error box.
 8. **Multi-account notifications:** a message to a background account shows
    "<tab name> · <sender>" as title. Clicking it brings Altus forward (also
    from the tray), switches to that account and WhatsApp opens the chat.

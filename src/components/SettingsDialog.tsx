@@ -5,6 +5,7 @@ import { getSettingValue, setSettingValue } from "../stores/settings/solid";
 import { StyledSwitch } from "./StyledSwitch";
 import StyledSelect from "./StyledSelect";
 import { I18NContext } from "../i18n/solid";
+import { isFullFolderPath } from "../utils/downloads";
 import {
   type Language,
   languageNames,
@@ -380,6 +381,12 @@ const SettingsDialog: Component<{
                   onChange={(value) =>
                     setSettingValue("defaultDownloadDir", value)
                   }
+                  validationState={
+                    !getSettingValue("defaultDownloadDir") ||
+                    isFullFolderPath(getSettingValue("defaultDownloadDir"), window.platform)
+                      ? "valid"
+                      : "invalid"
+                  }
                 >
                   <TextField.Label class="text-[0.95rem] leading-none">
                     <div class="flex flex-col gap-1.5">
@@ -389,10 +396,15 @@ const SettingsDialog: Component<{
                       </div>
                     </div>
                   </TextField.Label>
-                  <TextField.Input
-                    class="text-sm py-1.5 px-2.5 bg-zinc-700/50 border rounded border-zinc-600 outline-none focus:border-zinc-300 "
-                    spellcheck={false}
-                  />
+                  <div class="flex flex-col gap-1.5">
+                    <TextField.Input
+                      class="text-sm py-1.5 px-2.5 bg-zinc-700/50 border rounded border-zinc-600 outline-none focus:border-zinc-300 "
+                      spellcheck={false}
+                    />
+                    <TextField.ErrorMessage class="text-red-300 max-w-[30ch] leading-snug text-sm">
+                      {t("defaultDownloadDirNotFull")}
+                    </TextField.ErrorMessage>
+                  </div>
                 </TextField.Root>
               </div>
             </Dialog.Description>

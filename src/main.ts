@@ -87,6 +87,7 @@ import {
 } from "./updater";
 import { isAltusPartition, isTrustedWhatsAppURL, getSafeExternalHttpURL } from "./utils/security";
 import { allowPermissionCheck, allowPermissionRequest } from "./utils/permissions";
+import { isFullFolderPath } from "./utils/downloads";
 import {
   PROTOCOL_ARGS,
   WHATSAPP_PROTOCOL,
@@ -602,10 +603,16 @@ if (!singleInstanceLock) {
 
     contextMenu();
 
+    // A folder that is not a full path would make electron-dl throw in every
+    // download; Settings warns under the field, the default folder is used.
     const defaultDownloadDir = getSettingWithDefault("defaultDownloadDir");
+    const downloadDirectory = isFullFolderPath(defaultDownloadDir, process.platform) ? defaultDownloadDir : undefined;
+    if (defaultDownloadDir && !downloadDirectory) {
+      console.warn("The download folder in Settings is not a full path; downloads use the default folder");
+    }
     electronDl({
       saveAs: getSettingWithDefault("showSaveDialog"),
-      directory: defaultDownloadDir ? defaultDownloadDir : undefined,
+      directory: downloadDirectory,
       onCompleted: (file) => {
         const id = nextDownloadId++;
         completedDownloads.set(id, file.path);
