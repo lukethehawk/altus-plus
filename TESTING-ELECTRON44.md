@@ -161,6 +161,10 @@ logged in.
     main process's JavaScript memory and its growth per hour. In the CSV
     the "main" rows have three more columns: JavaScript heap used and
     reserved, and external memory.
+18. **New chat:** File → Start New Chat with `+39 333 1234567` (spaces and
+    "+" included) opens the chat with that number in the active account;
+    `0039…` works too. Text that is not a number shows "Enter the number
+    with its country code…" under the field and opens nothing.
 
 ### Automated smoke test
 

@@ -3,10 +3,12 @@ import CloseIcon from "../icons/CloseIcon";
 import { createSignal, useContext } from "solid-js";
 import { getActiveWebviewElement } from "../stores/tabs/solid";
 import { I18NContext } from "../i18n/solid";
+import { whatsAppChatAddress } from "../utils/whatsappLinks";
 
 const NewChatDialog = (props: { close: () => void }) => {
   const { t } = useContext(I18NContext);
   const [phoneNumber, setPhoneNumber] = createSignal("");
+  const [invalidNumber, setInvalidNumber] = createSignal(false);
 
   return (
     <Dialog.Portal>
@@ -34,19 +36,29 @@ const NewChatDialog = (props: { close: () => void }) => {
           </div>
           <Dialog.Description class="pt-0.5 pb-2">
             <form
-              onSubmit={() => {
+              onSubmit={(event) => {
+                // The page itself must never navigate to the form's target.
+                event.preventDefault();
+                if (!phoneNumber().trim()) return;
+                const address = whatsAppChatAddress(phoneNumber());
+                if (!address) {
+                  setInvalidNumber(true);
+                  return;
+                }
                 const activeWebview = getActiveWebviewElement();
                 if (!activeWebview) return;
-                const number = phoneNumber();
-                if (!number) return;
-                activeWebview.src = `https://web.whatsapp.com/send/?phone=${number}`;
+                activeWebview.src = address;
                 props.close();
               }}
             >
               <TextField.Root
                 class="flex flex-col gap-1.5 py-2"
                 value={phoneNumber()}
-                onChange={setPhoneNumber}
+                onChange={(value) => {
+                  setPhoneNumber(value);
+                  setInvalidNumber(false);
+                }}
+                validationState={invalidNumber() ? "invalid" : "valid"}
               >
                 <TextField.Label class="text-[0.95rem] leading-none">
                   {t("Phone number")}:
@@ -60,6 +72,9 @@ const NewChatDialog = (props: { close: () => void }) => {
                     }, 5);
                   }}
                 />
+                <TextField.ErrorMessage class="text-sm text-red-300 leading-snug max-w-[40ch]">
+                  {t("newChatInvalidNumber")}
+                </TextField.ErrorMessage>
               </TextField.Root>
               <button
                 type="submit"

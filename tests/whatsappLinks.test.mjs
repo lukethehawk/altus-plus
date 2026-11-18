@@ -4,6 +4,8 @@ import {
   findWhatsAppLink,
   whatsAppWebAddress,
   describeWhatsAppWebAddress,
+  normalizePhoneNumber,
+  whatsAppChatAddress,
 } from "../src/utils/whatsappLinks.ts";
 import { isTrustedWhatsAppURL } from "../src/utils/security.ts";
 
@@ -78,4 +80,21 @@ test("describes what an address opens", () => {
   for (const address of ["https://evil.example/send?phone=1", "https://web.whatsapp.com/", "nonsense"]) {
     assert.equal(describeWhatsAppWebAddress(address), null, address);
   }
+});
+
+test("a number typed in Start New Chat becomes a WhatsApp Web chat", () => {
+  const chat = "https://web.whatsapp.com/send?phone=393331234567";
+  for (const typed of ["+39 333 1234567", "393331234567", "0039 333 1234567", "+39 (333) 123-4567", " +39.333.123.4567 ", "+0039 3331234567"]) {
+    assert.equal(whatsAppChatAddress(typed), chat, typed);
+  }
+  for (const typed of ["", "   ", "abc", "+39 333 abc 4567", "1234", "001234", "1234567890123456", "+39/333", "39333&text=x", undefined, 393331234567]) {
+    assert.equal(whatsAppChatAddress(typed), null, String(typed));
+  }
+});
+
+test("links and typed numbers share the same number rules", () => {
+  assert.equal(normalizePhoneNumber("+39 333 123-4567"), "393331234567");
+  assert.equal(normalizePhoneNumber("0039 333 1234567"), "393331234567");
+  assert.equal(whatsAppWebAddress("whatsapp://send?phone=0039%20333%201234567"), "https://web.whatsapp.com/send?phone=393331234567");
+  assert.equal(whatsAppWebAddress("whatsapp://send?phone=001234"), null);
 });
