@@ -30,7 +30,9 @@
 //    A whatsapp:// link reaching the running app asks which account opens it
 //    (Cancel opens nothing; a link that is not a chat or invite is ignored).
 //    It plays a near-silent tone and shows a silent notification for a moment;
-// 6. Help → Run Resource Test restarts the app into the test, which records
+// 6. With the custom title bar, turning it off and reloading the page's
+//    settings keeps it until the restart, which comes without it.
+//    Help → Run Resource Test restarts the app into the test, which records
 //    the three accounts into a CSV file; a file downloaded in a tab during
 //    the test lands in the folder from Settings with "Attachment saved";
 //    Help → End Resource Test writes the
@@ -1129,6 +1131,29 @@ const TITLE_FLOOD = `(() => {
 })()`;
 
 /**
+ * The custom title bar stays as the window was created until the next start.
+ * Turning the setting off and then reloading the page's settings, as "Allow
+ * Moving Tabs" or a language change does, used to remove it from a window
+ * without a frame, leaving no buttons and no menu.
+ */
+async function checkTitlebarKept(cdp) {
+  const count = () => cdp.evaluate('document.querySelectorAll("[data-custom-titlebar]").length');
+  try {
+    const before = await count();
+    if (before !== 1) return [`custom title bar: ${before} on a window created with it, expected 1`];
+    await cdp.evaluate('window.electronSettingsStore.setSetting("customTitlebar", false)');
+    // Tab → Allow Moving Tabs: the page reloads its settings.
+    await cdp.evaluate('window.electronSettingsStore.setSetting("tabReordering", true)');
+    await sleep(2000);
+    const after = await count();
+    await cdp.evaluate('window.electronSettingsStore.setSetting("tabReordering", false)');
+    return after === 1 ? [] : [`custom title bar: ${after} after turning it off and reloading the settings, expected 1 until the next start`];
+  } catch (error) {
+    return [`custom title bar: ${error.message}`];
+  }
+}
+
+/**
  * An attachment downloaded during the resource test goes through electron-dl
  * like any other: into the folder from Settings, with "Attachment saved".
  * The test's first sample creates the tabs' sessions, which used to happen
@@ -1171,12 +1196,15 @@ async function checkResourceTest() {
   fs.mkdirSync(downloads);
   fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({
     showSaveDialog: { value: false }, defaultDownloadDir: { value: downloads },
+    // Turned off during the first run: the restart into the test has a frame.
+    customTitlebar: { value: true },
   }));
   const first = launch(PACKAGED_EXE, [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`]);
   let cdp;
   try {
     // Help → Run Resource Test… → Restart and Measure.
     cdp = await attachWhen(port, "Help → Run Resource Test", 90_000, async (page) => (await menuIds(page)).includes("resource-test"));
+    failures.push(...(await checkTitlebarKept(cdp)));
     // Unread counts in flight while the app closes, as when the accounts sync
     // right after a start: every tab changes its title nonstop. A count that
     // reached the destroyed window stopped the restart with an error box.
@@ -1198,6 +1226,9 @@ async function checkResourceTest() {
     }
 
     cdp = await attachWhen(port, "the app restarted in the resource test", 90_000, async (page) => (await menuIds(page)).includes("end-resource-test"));
+    // Turned off before the restart, so this window has a frame and no custom title bar.
+    const titlebars = await cdp.evaluate('document.querySelectorAll("[data-custom-titlebar]").length');
+    if (titlebars !== 0) failures.push(`custom title bar: ${titlebars} after restarting with the setting off`);
     const names = BACKGROUND_TABS.map((tab) => tab.name);
     let csv;
     try {
@@ -1651,7 +1682,7 @@ const checks = [
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors; started by a whatsapp:// link", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account", checkStartInTray],
   ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
-  ["6. Resource test: restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
+  ["6. Resource test: title bar kept until restart, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
 ];
 if (runInstaller) {
   checks.push(

@@ -23,7 +23,7 @@
     "lint": "tsc --noEmit && eslint --ext .ts,.tsx .",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "smoke": "node .github/scripts/smoke-test.mjs",
-    "test:keys": "electron .github/scripts/enter-keys-test.mjs"
+    "test:keys": "electron .github/scripts/enter-keys-test.mjs && electron .github/scripts/format-text-test.mjs"
   },
   "keywords": [
     "whatsapp",

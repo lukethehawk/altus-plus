@@ -58,9 +58,8 @@ const App: Component = () => {
   return (
     <I18NProvider>
       <div class="flex flex-col h-full">
-        {getSettingValue("customTitlebar") && window.platform !== "darwin" && (
-          <CustomTitlebar menu={menu} />
-        )}
+        {/* As the window was created: the setting applies at the next start. */}
+        {window.customTitlebar && <CustomTitlebar menu={menu} />}
         <div
           class={twJoin(
             "h-full flex overflow-hidden",

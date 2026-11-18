@@ -24,6 +24,31 @@ export function findWhatsAppLink(argv: readonly string[]): string | null {
 }
 
 /**
+ * A phone number as WhatsApp Web's send?phone= expects it: international
+ * format, digits only (E.164 allows up to 15). Spaces, "+", brackets, dots
+ * and dashes go, and so does the international prefix "00" ("0039…" is
+ * "+39…"). Null when what is left is not 5 to 15 digits.
+ */
+export function normalizePhoneNumber(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const digits = raw.replace(/[\s+().-]/g, "").replace(/^00/, "");
+  return /^\d{5,15}$/.test(digits) ? digits : null;
+}
+
+/**
+ * The WhatsApp Web address of a chat with a number typed in File → Start New
+ * Chat, or null when it is not a valid number. Put into the address as typed,
+ * "+39 333…" reached WhatsApp as " 39 333…" (a "+" in a query is a space).
+ */
+export function whatsAppChatAddress(number: unknown): string | null {
+  const phone = normalizePhoneNumber(number);
+  if (!phone) return null;
+  const address = new URL("https://web.whatsapp.com/send");
+  address.searchParams.set("phone", phone);
+  return address.href;
+}
+
+/**
  * The WhatsApp Web address for a whatsapp:// link, or null when it is not one
  * of these:
  * - whatsapp://send?phone=<number>&text=<message> (also send/?…; either part
@@ -51,9 +76,8 @@ export function whatsAppWebAddress(link: string): string | null {
       const address = new URL("https://web.whatsapp.com/send");
       let empty = true;
       if (rawPhone !== null && rawPhone !== "") {
-        // International format, digits only (E.164 allows up to 15).
-        const phone = rawPhone.replace(/[\s+().-]/g, "");
-        if (!/^\d{5,15}$/.test(phone)) return null;
+        const phone = normalizePhoneNumber(rawPhone);
+        if (!phone) return null;
         address.searchParams.set("phone", phone);
         empty = false;
       }
