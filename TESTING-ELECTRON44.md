@@ -118,10 +118,14 @@ logged in.
       Ctrl+Enter sends;
     - with "Send with Right Shift + Enter" on, Right Shift + Enter sends
       (also twice in a row while holding Right Shift), and Left Shift +
-      Enter adds a new line.
+      Enter adds a new line;
+    - Ctrl+B, I, S and M on text selected in the message being written make
+      it bold, italic, struck through or monospace; with text selected in a
+      received message they change nothing (they used to alter it on
+      screen and replace the draft with it).
 
     `yarn test:keys` (also run in CI) checks the same key handling in an
-    Electron window.
+    Electron window, and the formatting in a page shaped like a chat.
 14. **Tray tooltip:** hovering the tray icon shows "Altus +" and one line per
     account in tab order, "<tab name>: <unread chats>", the same number as
     the tab badge. A muted account ends with "(muted)" ("(silenziato)" in

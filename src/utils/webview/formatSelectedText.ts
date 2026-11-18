@@ -129,7 +129,11 @@ export function formatSelectedText(wrapper: TextWrapper) {
 
   const selection = window.getSelection();
   if (!selection) return;
-  if (!selection.anchorNode?.parentElement) return;
+  if (!selection.anchorNode?.parentElement || !selection.focusNode) return;
+  // Only text selected in the message being written: a selection in a
+  // received message used to be formatted on screen, and its text replaced
+  // the draft.
+  if (!messageInput.contains(selection.anchorNode) || !messageInput.contains(selection.focusNode)) return;
 
   const focusOffset = selection.focusOffset;
   const anchorOffset = selection.anchorOffset;
