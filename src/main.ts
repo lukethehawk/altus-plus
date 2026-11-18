@@ -448,6 +448,11 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       webviewTag: true,
+      // The page draws its own title bar exactly when the window has no
+      // frame. Following the saved setting instead, it vanished (no buttons,
+      // no menu) or doubled when the setting changed and the page reloaded
+      // its settings, as a language change does, until the next start.
+      additionalArguments: useCustomTitlebar ? ["--altus-custom-titlebar"] : [],
     },
     title: `${APP_NAME} ${app.getVersion()}`,
     show: false,

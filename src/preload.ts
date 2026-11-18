@@ -172,6 +172,14 @@ contextBridge.exposeInMainWorld("clickMenuItem", (id: string) =>
 
 contextBridge.exposeInMainWorld("platform", process.platform);
 
+// How the main process created this window (createWindow), not the saved
+// setting: the setting applies at the next start, and the page also
+// reloads its settings mid-session (language, tab menu) or after a crash.
+contextBridge.exposeInMainWorld(
+  "customTitlebar",
+  process.argv.includes("--altus-custom-titlebar")
+);
+
 contextBridge.exposeInMainWorld("windowActions", {
   minimize: () => ipcRenderer.invoke("minimize-window"),
   maximize: () => ipcRenderer.invoke("maximize-window"),

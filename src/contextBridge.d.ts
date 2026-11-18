@@ -40,5 +40,7 @@ declare global {
     clickMenuItem: (id: string) => Promise<void>;
     showDownloadInFolder: (id: number) => Promise<void>;
     platform: NodeJS.Platform;
+    /** Whether this window was created without a frame, for the custom title bar. */
+    customTitlebar: boolean;
   }
 }

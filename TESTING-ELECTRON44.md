@@ -212,7 +212,11 @@ fails it uploads no installer.
    as playing either), only the playing check is skipped, with a note. Run
    locally, the check plays a near-silent tone and shows a silent
    notification for a moment.
-6. Help → Run Resource Test… → Restart and Measure restarts the app into
+6. On a profile with the custom title bar, turning it off and then Tab →
+   Allow Moving Tabs (which reloads the page's settings) keeps the title bar
+   until the restart; the restarted window has a frame and no custom title
+   bar (the bar used to vanish at once, leaving a window without buttons).
+   Help → Run Resource Test… → Restart and Measure restarts the app into
    the test with three tabs, which change their title every 20 ms
    beforehand, so unread counts keep arriving while the app closes (one
    reaching the destroyed window used to stop the restart with "Object has
