@@ -124,7 +124,10 @@ logged in.
     account in tab order, "<tab name>: <unread chats>", the same number as
     the tab badge. A muted account ends with "(muted)" ("(silenziato)" in
     Italian) until the mute expires. Renaming, reordering or closing a tab
-    and switching language update it.
+    and switching language update it. Closing the only tab with unread
+    chats also turns off the red dot on the tray icon and taskbar; so does
+    turning off the badge setting, and turning the tray icon off and on
+    keeps the dot while chats are unread.
 15. **Moving tabs:** by default dragging a tab does nothing. Tab → Allow
     Moving Tabs ticks the item; then dragging a tab onto another shows a
     blue line on the side it will land and moves it there on release, and

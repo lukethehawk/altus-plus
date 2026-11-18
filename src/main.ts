@@ -65,7 +65,7 @@ import {
 } from "./utils/startup";
 import { attachEnterKeys } from "./utils/keyboard";
 import { isMuteActive } from "./utils/notifications";
-import { formatTrayTooltip } from "./utils/tray";
+import { formatTrayTooltip, totalUnread } from "./utils/tray";
 import { groupProcessUsage } from "./utils/resources";
 import {
   RESOURCE_TEST_FLAG,
@@ -889,7 +889,8 @@ function toggleTray(mainWindow: BrowserWindow, enabled: boolean) {
       : trayIcon
   );
   trayTooltip = "";
-  updateTrayTooltip();
+  // A new icon starts without the badge.
+  updateUnreadIndicators(mainWindow);
   // A timed mute may have ended since the last update.
   tray.on("mouse-enter", () => updateTrayTooltip());
   tray.setContextMenu(getLocalizedTrayMenu());
@@ -1000,6 +1001,10 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
         electronSettingsStore.set(key, { value });
         queueAutostartUpdate();
         return;
+      } else if (key === "notificationBadge") {
+        electronSettingsStore.set(key, { value });
+        updateUnreadIndicators(mainWindow);
+        return;
       }
       return electronSettingsStore.set(key, { value });
     }
@@ -1017,8 +1022,9 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
       if (key === "tabs" && value !== undefined) recordClosedTab(value);
       if (value === undefined) electronTabStore.delete(key);
       else electronTabStore.set(key, value);
-      // Names, order and mutes of the accounts.
-      if (key === "tabs") updateTrayTooltip();
+      // Names, order and mutes of the accounts; a closed tab's chats no
+      // longer count.
+      if (key === "tabs") updateUnreadIndicators(mainWindow);
     }
   );
 
@@ -1164,33 +1170,31 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     unreadByTab.set(tabId, messageCount as number);
     resourceTest?.accountLoaded(tabId, tabs.find((tab) => tab.id === tabId)?.name ?? "");
     mainWindow.webContents.send("message-count", { tabId, messageCount });
-    updateTrayTooltip(tabs);
-    if (!getSettingWithDefault("notificationBadge")) {
-      return;
-    }
-    const totalUnread = [...unreadByTab.values()].reduce((sum, count) => sum + count, 0);
-    if (totalUnread > 0) {
-      switch (process.platform) {
-        case "darwin":
-          app.dock?.setBadge("·");
-          break;
-        default:
-          if (tray) tray.setImage(trayNotificationIcon);
-          mainWindow.setOverlayIcon(mainNotificationIcon, "Notification badge");
-          break;
-      }
-    } else {
-      switch (process.platform) {
-        case "darwin":
-          app.dock?.setBadge("");
-          break;
-        default:
-          if (tray) tray.setImage(trayIcon);
-          mainWindow.setOverlayIcon(null, "Notification badge empty");
-          break;
-      }
-    }
+    updateUnreadIndicators(mainWindow, tabs);
   });
+}
+
+/**
+ * The tray tooltip and the unread badge (tray icon and taskbar overlay),
+ * from the counts of the tabs that still exist. Called when a count
+ * changes, and also when a tab closes, the tray icon is recreated or the
+ * badge setting changes: before, the badge stayed lit after closing the
+ * only tab with unread chats, and a recreated tray icon lost it.
+ */
+function updateUnreadIndicators(mainWindow: BrowserWindow, tabs: Tab[] = electronTabStore.get("tabs")) {
+  if (mainWindow.isDestroyed()) return;
+  const tabIds = new Set(tabs.map((tab) => tab.id));
+  for (const id of unreadByTab.keys()) {
+    if (!tabIds.has(id)) unreadByTab.delete(id);
+  }
+  updateTrayTooltip(tabs);
+  const lit = getSettingWithDefault("notificationBadge") && totalUnread(unreadByTab, tabIds) > 0;
+  if (process.platform === "darwin") {
+    app.dock?.setBadge(lit ? "·" : "");
+    return;
+  }
+  if (tray && !tray.isDestroyed()) tray.setImage(lit ? trayNotificationIcon : trayIcon);
+  mainWindow.setOverlayIcon(lit ? mainNotificationIcon : null, lit ? "Notification badge" : "Notification badge empty");
 }
 
 type CloneableMenuItem = Omit<MenuItem, "menu" | "submenu" | "click"> & {

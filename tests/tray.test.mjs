@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatTrayTooltip, TRAY_TOOLTIP_MAX_LENGTH } from "../src/utils/tray.ts";
+import { formatTrayTooltip, totalUnread, TRAY_TOOLTIP_MAX_LENGTH } from "../src/utils/tray.ts";
 
 const account = (name, unread = 0, muted = false) => ({ name, unread, muted });
 
@@ -80,4 +80,16 @@ test("typical names fit without dropping anything", () => {
   const text = formatTrayTooltip("Altus +", accounts, "silenziato");
   assert.equal(text.split("\n").length, 4);
   assert.ok(!text.includes("…"));
+});
+
+test("the unread badge counts only the accounts that still exist", () => {
+  const unread = new Map([["alfa", 2], ["beta", 0], ["closed", 5]]);
+  assert.equal(totalUnread(unread, ["alfa", "beta", "closed"]), 7);
+  // The tab with 5 unread chats was closed: the badge must go out if the rest read 0.
+  assert.equal(totalUnread(unread, ["alfa", "beta"]), 2);
+  assert.equal(totalUnread(new Map([["alfa", 0], ["closed", 5]]), ["alfa"]), 0);
+  assert.equal(totalUnread(unread, []), 0);
+  // A tab listed twice counts once; invalid counts count as zero.
+  assert.equal(totalUnread(unread, ["alfa", "alfa"]), 2);
+  assert.equal(totalUnread(new Map([["a", -1], ["b", 1.5], ["c", Number.NaN]]), ["a", "b", "c"]), 0);
 });
