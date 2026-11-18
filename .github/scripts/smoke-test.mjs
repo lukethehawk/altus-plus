@@ -31,7 +31,9 @@
 //    (Cancel opens nothing; a link that is not a chat or invite is ignored).
 //    It plays a near-silent tone and shows a silent notification for a moment;
 // 6. Help → Run Resource Test restarts the app into the test, which records
-//    the three accounts into a CSV file; Help → End Resource Test writes the
+//    the three accounts into a CSV file; a file downloaded in a tab during
+//    the test lands in the folder from Settings with "Attachment saved";
+//    Help → End Resource Test writes the
 //    summary and restarts the app normally (it also opens Explorer there).
 //    The tabs send unread counts nonstop while the app closes to restart;
 //    one reaching the destroyed window used to hold it with an error box;
@@ -1126,6 +1128,35 @@ const TITLE_FLOOD = `(() => {
   setInterval(() => { document.title = "(" + (++count % 100) + ") WhatsApp"; }, 20);
 })()`;
 
+/**
+ * An attachment downloaded during the resource test goes through electron-dl
+ * like any other: into the folder from Settings, with "Attachment saved".
+ * The test's first sample creates the tabs' sessions, which used to happen
+ * before electron-dl was set up, so their downloads got neither.
+ */
+async function checkDownloadDuringTest(cdp, downloads) {
+  const name = "smoke-download.txt";
+  const download = `(() => {
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob(["smoke"], { type: "text/plain" }));
+    link.download = ${JSON.stringify(name)};
+    document.body.append(link);
+    link.click();
+    link.remove();
+  })()`;
+  try {
+    await cdp.evaluate(`document.querySelector("webview").executeJavaScript(${JSON.stringify(download)}, true)`);
+    // The notice shows for 6 s once the file is saved.
+    await waitFor(`${name} in the download folder from Settings, with "Attachment saved"`, 30_000, async () =>
+      fs.existsSync(path.join(downloads, name)) &&
+      cdp.evaluate(`!!document.querySelector('[role="status"][title=${JSON.stringify(name)}]')`));
+    return [];
+  } catch (error) {
+    const saved = fs.existsSync(downloads) ? fs.readdirSync(downloads) : [];
+    return [`download during the resource test: ${error.message} (download folder: ${saved.length ? saved.join(", ") : "empty"})`];
+  }
+}
+
 async function checkResourceTest() {
   const failures = [];
   const notes = [];
@@ -1134,6 +1165,12 @@ async function checkResourceTest() {
   const folder = path.join(profile, "resource-tests");
   fs.writeFileSync(path.join(profile, "tabs.json"), JSON.stringify({
     tabs: BACKGROUND_TABS, previouslyClosedTab: null, selectedTabId: ALFA.id,
+  }));
+  // Downloads go straight into this folder, without the save dialog.
+  const downloads = path.join(profile, "downloads");
+  fs.mkdirSync(downloads);
+  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({
+    showSaveDialog: { value: false }, defaultDownloadDir: { value: downloads },
   }));
   const first = launch(PACKAGED_EXE, [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`]);
   let cdp;
@@ -1204,6 +1241,8 @@ async function checkResourceTest() {
       notes.push(`${csv.file}: ${csv.text.split(/\r?\n/).filter(Boolean).length} rows after the pages loaded`);
       notes.push(`startup: ${found.map(([event, seconds]) => `${event} ${seconds} s`).join(", ")}; main JavaScript ${mainRows.at(-1)?.[8]} MB`);
     }
+
+    failures.push(...(await checkDownloadDuringTest(cdp, downloads)));
 
     // Help → End Resource Test: summary, then a normal restart.
     await cdp.evaluate('window.clickMenuItem("end-resource-test")').catch(() => undefined);
@@ -1612,7 +1651,7 @@ const checks = [
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors; started by a whatsapp:// link", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account", checkStartInTray],
   ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
-  ["6. Resource test: restart into it, record three accounts, summary, normal restart", checkResourceTest],
+  ["6. Resource test: restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
 ];
 if (runInstaller) {
   checks.push(

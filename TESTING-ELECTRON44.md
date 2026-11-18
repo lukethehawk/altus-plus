@@ -222,7 +222,10 @@ fails it uploads no installer.
    "window created", from "Electron ready" on with the main process's CPU
    time), "window shown", a
    "WhatsApp page loaded" line, samples for each account and the main
-   process's JavaScript memory on its rows. Help → End Resource Test writes
+   process's JavaScript memory on its rows. A file downloaded in a tab
+   during the test lands in the download folder from Settings and shows
+   "Attachment saved" (the test's sessions used to miss the download
+   handling). Help → End Resource Test writes
    the summary (listing the three accounts, the startup times and the main
    process, and the longest startup step), closes the CSV with "test ended",
    opens Explorer there and restarts the app normally. The restarted

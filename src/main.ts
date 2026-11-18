@@ -597,12 +597,11 @@ if (!singleInstanceLock) {
     queueAutostartUpdate();
     startupTimes.autostartCheckedAt = startupMoment("autostart");
 
-    const mainWindow = createWindow();
-    startupTimes.windowCreatedAt = startupMoment("window");
-    if (resourceTestMode) startResourceTest(mainWindow);
-
-    contextMenu();
-
+    // Before any tab session exists: electron-dl only handles the sessions
+    // created after it (session-created), and the resource test's first
+    // sample creates every tab's session right after the window. Its
+    // downloads used Electron's default handling (no folder, no "Attachment
+    // saved"). onCompleted runs after a download, once mainWindow exists.
     // A folder that is not a full path would make electron-dl throw in every
     // download; Settings warns under the field, the default folder is used.
     const defaultDownloadDir = getSettingWithDefault("defaultDownloadDir");
@@ -626,6 +625,12 @@ if (!singleInstanceLock) {
         });
       },
     });
+
+    const mainWindow = createWindow();
+    startupTimes.windowCreatedAt = startupMoment("window");
+    if (resourceTestMode) startResourceTest(mainWindow);
+
+    contextMenu();
 
     initializeI18N(mainWindow).then(() => {
       toggleTray(mainWindow, getSettingWithDefault("trayIcon"));
