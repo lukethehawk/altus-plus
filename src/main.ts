@@ -21,6 +21,7 @@ import { electronTabStore } from "./stores/tabs/electron";
 import { Tab, TabStore } from "./stores/tabs/common";
 import { electronThemeStore } from "./stores/themes/electron";
 import { ThemeStore } from "./stores/themes/common";
+import { isValidTabStoreValue, isValidThemeStoreValue, usableTabs } from "./utils/storeValidation";
 import { electronSettingsStore } from "./stores/settings/electron";
 import {
   fallbackLanguage,
@@ -130,6 +131,9 @@ let trayTooltip = "";
 // Unread chats per account, as counted in each WhatsApp page title.
 const unreadByTab = new Map<string, number>();
 
+/** The saved tabs: a list, and only tabs whose ID can name a partition. */
+const savedTabs = () => usableTabs(electronTabStore.get("tabs"));
+
 /** Hovering the tray icon shows the unread chats of every account. */
 function updateTrayTooltip(tabs?: Tab[]) {
   if (!tray || tray.isDestroyed()) return;
@@ -138,7 +142,7 @@ function updateTrayTooltip(tabs?: Tab[]) {
     const now = Date.now();
     const text = formatTrayTooltip(
       APP_NAME,
-      (tabs ?? electronTabStore.get("tabs")).map((tab) => ({
+      (tabs ?? savedTabs()).map((tab) => ({
         name: typeof tab.name === "string" ? tab.name : "",
         unread: unreadByTab.get(tab.id) ?? 0,
         muted: isMuteActive(tab.config?.notificationsMutedUntil, now),
@@ -229,7 +233,7 @@ function endResourceTest() {
 
 /** CPU and memory of each account and of the app's own processes, now. */
 function sampleResourceUsage(mainWindow: BrowserWindow) {
-  const tabs = electronTabStore.get("tabs");
+  const tabs = savedTabs();
   const pidByTab = new Map<string, number>();
   // Chromium's own process IDs, which service workers are reported with.
   const pageProcessIds = new Set<number>();
@@ -934,10 +938,7 @@ const partitionsWithPermissionHandlers = new Set<string>();
 function setUpTabPermissions(partition: string) {
   if (partitionsWithPermissionHandlers.has(partition)) return;
   partitionsWithPermissionHandlers.add(partition);
-  const switchesOf = () => {
-    const tabs = electronTabStore.get("tabs");
-    return Array.isArray(tabs) ? tabs.find((tab) => `persist:${tab?.id}` === partition)?.config : undefined;
-  };
+  const switchesOf = () => savedTabs().find((tab) => `persist:${tab.id}` === partition)?.config;
   const tabSession = session.fromPartition(partition);
   tabSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     // The frame asking, so that a page embedded in WhatsApp gets nothing.
@@ -1036,6 +1037,8 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     (event, key: keyof TabStore, value: unknown) => {
       if (event.sender !== mainWindow.webContents) throw new Error("Unauthorized tab sender");
       if (!["tabs", "selectedTabId", "previouslyClosedTab"].includes(key)) throw new Error("Invalid tab store key");
+      // Nothing of a refused value is saved: no tab list, no closed tab.
+      if (!isValidTabStoreValue(key, value)) throw new Error("Invalid tab store value");
       if (key === "tabs" && value !== undefined) recordClosedTab(value);
       if (value === undefined) electronTabStore.delete(key);
       else electronTabStore.set(key, value);
@@ -1061,7 +1064,8 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     "theme-store-set",
     (event, key: keyof ThemeStore, value: unknown) => {
       if (event.sender !== mainWindow.webContents || key !== "themes") throw new Error("Unauthorized theme store update");
-      if (value === undefined) return electronThemeStore.delete(key);
+      // A list, of themes with an ID; never deleted (which reset it to the built-in themes).
+      if (!isValidThemeStoreValue(key, value)) throw new Error("Invalid theme store value");
       return electronThemeStore.set(key, value);
     }
   );
@@ -1142,7 +1146,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     const { sender } = event;
     if (sender.getType() !== "webview" || !isTrustedWhatsAppURL(sender.getURL())) return;
     if (typeof tabId !== "string" || !isAltusPartition(`persist:${tabId}`)) return;
-    if (!electronTabStore.get("tabs").some((tab) => tab.id === tabId)) return;
+    if (!savedTabs().some((tab) => tab.id === tabId)) return;
     // Only the tab's own session may bring that tab forward.
     if (sender.session !== session.fromPartition(`persist:${tabId}`)) return;
     if (mainWindow.isDestroyed()) return;
@@ -1178,7 +1182,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     const { tabId, messageCount } = detail as { tabId?: unknown; messageCount?: unknown };
     if (typeof tabId !== "string" || !Number.isSafeInteger(messageCount) ||
         (messageCount as number) < 0 || (messageCount as number) > 100000) return;
-    const tabs = electronTabStore.get("tabs");
+    const tabs = savedTabs();
     const activeIds = new Set(tabs.map((tab) => tab.id));
     if (!activeIds.has(tabId)) return;
     for (const id of unreadByTab.keys()) {
@@ -1198,7 +1202,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
  * badge setting changes: before, the badge stayed lit after closing the
  * only tab with unread chats, and a recreated tray icon lost it.
  */
-function updateUnreadIndicators(mainWindow: BrowserWindow, tabs: Tab[] = electronTabStore.get("tabs")) {
+function updateUnreadIndicators(mainWindow: BrowserWindow, tabs: Tab[] = savedTabs()) {
   if (mainWindow.isDestroyed()) return;
   const tabIds = new Set(tabs.map((tab) => tab.id));
   for (const id of unreadByTab.keys()) {

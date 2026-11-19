@@ -25,6 +25,10 @@
 //    and turning a tab's Notifications and Microphone and Camera off (in the
 //    saved tab list) makes it report and get "denied" at once, until they
 //    are turned on again.
+//    The window cannot save a tab list main could misread (a tab ID that
+//    cannot name a partition folder, the same account twice, no list at
+//    all) or a theme list of the wrong shape; tabs as earlier versions saved
+//    them are still accepted.
 //    Tabs move by dragging only once "Allow Moving Tabs" is on, and
 //    Help → Resource Usage lists every account and recognises every process.
 //    A whatsapp:// link reaching the running app asks which account opens it
@@ -843,6 +847,47 @@ async function checkResourcePanel(cdp, failures, notes) {
 }
 
 /**
+ * Main checks what the window saves in the tab and theme lists: a tab whose
+ * ID cannot name a partition folder, a list that is not a list, the same
+ * account twice, a theme without an ID are refused and change nothing on
+ * disk. Tabs as earlier versions saved them (no Microphone and Camera
+ * switch, fields this version does not know) are still accepted.
+ */
+async function checkStoreWrites(cdp, profile, failures) {
+  const tabsFile = path.join(profile, "tabs.json");
+  const themesFile = path.join(profile, "themes.json");
+  const save = (call) => cdp.evaluate(`${call}.then(() => "saved", () => "refused")`);
+  const saveTabs = (tabs) => save(`window.electronTabStore.set("tabs", ${JSON.stringify(tabs)})`);
+  const saveThemes = (themes) => save(`window.electronThemeStore.setThemes(${JSON.stringify(themes)})`);
+  const tabsBefore = fs.readFileSync(tabsFile, "utf8");
+  const themesBefore = fs.readFileSync(themesFile, "utf8");
+  const refused = [
+    ["a tab whose ID leaves the Partitions folder", `window.electronTabStore.set("tabs", ${JSON.stringify([...BACKGROUND_TABS, { ...BETA, id: "../smokeEscape" }])})`],
+    ["a tab list that is not a list", `window.electronTabStore.set("tabs", "smoke")`],
+    ["the same account twice", `window.electronTabStore.set("tabs", ${JSON.stringify([...BACKGROUND_TABS, ALFA])})`],
+    ["no tab list at all", `window.electronTabStore.set("tabs", undefined)`],
+    ["a selected tab that is not a tab ID", `window.electronTabStore.set("selectedTabId", 42)`],
+    ["a closed tab without an ID", `window.electronTabStore.set("previouslyClosedTab", { name: "Smoke" })`],
+    ["a theme without an ID", `window.electronThemeStore.setThemes([{ name: "Smoke" }])`],
+    ["a theme list that is not a list", `window.electronThemeStore.setThemes({})`],
+  ];
+  for (const [what, call] of refused) {
+    if ((await save(call)) !== "refused") failures.push(`the window could save ${what}`);
+  }
+  if (fs.readFileSync(tabsFile, "utf8") !== tabsBefore) failures.push("a refused write changed tabs.json");
+  if (fs.readFileSync(themesFile, "utf8") !== themesBefore) failures.push("a refused write changed themes.json");
+
+  // As earlier versions saved them; then the window's own lists again.
+  const older = BACKGROUND_TABS.map(({ config: { media, spellChecker, ...config }, ...tab }) => ({ ...tab, smokeExtra: 1, config }));
+  if ((await saveTabs(older)) !== "saved") failures.push("tabs as earlier versions saved them were refused");
+  if ((await saveTabs(BACKGROUND_TABS)) !== "saved") failures.push("the window's own tab list was refused");
+  const themes = JSON.parse(themesBefore).themes;
+  const custom = { id: "smokeTheme00000000001", name: "Smoke", colors: { bg: "#10151E", fg: "#eeeeee", ac: "#40C486" } };
+  if ((await saveThemes([...themes, custom])) !== "saved") failures.push("a theme as the theme dialog saves it was refused");
+  if ((await saveThemes(themes)) !== "saved") failures.push("the window's own theme list was refused");
+}
+
+/**
  * Moving tabs is off by default; turned on (as the Tab menu does), a tab
  * dropped on another moves there and the order is saved.
  */
@@ -983,6 +1028,7 @@ function exerciseBackgroundTabs(run, audio, profile) {
         if (await cdp.evaluate(webviewCall(ALFA.id, "isAudioMuted"))) failures.push("Alfa after switching to Beta: audio muted");
         if (audio.monitored) await expectAudible(ALFA, "after switching to Beta");
 
+        await checkStoreWrites(cdp, profile, failures);
         await checkMovingTabs(cdp, profile, failures);
         await checkResourcePanel(cdp, failures, notes);
         await checkLinkChooser(cdp, profile, failures);
@@ -1681,7 +1727,7 @@ const checks = [
   ["2. Modified app.asar is refused", checkTamperedAsar],
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors; started by a whatsapp:// link", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account", checkStartInTray],
-  ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
+  ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, invalid tab and theme lists refused, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
   ["6. Resource test: title bar kept until restart, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
 ];
 if (runInstaller) {

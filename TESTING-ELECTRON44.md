@@ -209,6 +209,14 @@ fails it uploads no installer.
      which is checked on its own: Chromium reports a muted tab as playing
      too;
    - with the window shown, switching to Beta leaves Alfa's tone playing;
+   - with the window shown, the window cannot save a tab list with a tab ID
+     that leaves the `Partitions` folder (`../…`), a tab list that is not a
+     list or is missing, the same account twice, a selected tab that is not
+     a tab ID, a closed tab without an ID, or a theme list of the wrong
+     shape: each write is refused and `tabs.json` and `themes.json` stay
+     as they were. Tabs as earlier versions saved them (no Microphone and
+     Camera switch, unknown fields) and a theme as the theme dialog saves it
+     are accepted;
    - with the window shown, dragging Alfa onto Gamma does nothing while
      "Allow Moving Tabs" is off (the default). Turned on with the setting
      the menu item saves, the item is ticked, and the same drag moves Alfa
