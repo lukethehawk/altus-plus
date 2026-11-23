@@ -227,9 +227,10 @@ fails it uploads no installer.
      too;
    - with the window shown, what Beta's page sends stays Beta's: with its
      `document.body.dataset.tabId` changed to Alfa's ID, an unread count in
-     its title shows on Beta, not on Alfa; a `click` event the page
-     dispatches on its own notification does not bring Beta forward (only
-     the user's click, which a test cannot make, does);
+     its title shows on Beta, not on Alfa; a `<title>` element replaced by a
+     new one is still counted; a `click` event the page dispatches on its
+     own notification does not bring Beta forward (only the user's click,
+     which a test cannot make, does);
    - with the window shown, switching to Beta leaves Alfa's tone playing;
    - with the window shown, the window cannot save a tab list with a tab ID
      that leaves the `Partitions` folder (`../…`), a tab list that is not a

@@ -31,8 +31,8 @@
 //    are turned on again. (The microphone only where WhatsApp's page allows
 //    it: its login page at times blocks it by Permissions-Policy.)
 //    A page's unread count goes to its own tab even when the page claims
-//    another tab's ID, and a click on a notification made by a script does
-//    not bring the tab forward.
+//    another tab's ID, a replaced <title> is still counted, and a click on
+//    a notification made by a script does not bring the tab forward.
 //    The window cannot save a tab list main could misread (a tab ID that
 //    cannot name a partition folder, the same account twice, no list at
 //    all) or a theme list of the wrong shape; tabs as earlier versions saved
@@ -963,17 +963,22 @@ async function checkResourcePanel(cdp, failures, notes) {
 /**
  * What a WhatsApp page sends is tied to its own tab. Beta's page claims
  * Alfa's tab ID (document.body.dataset.tabId, which the page can change):
- * its unread count still goes to Beta. A click on a notification made by a
- * script, not by the user, does not bring Beta forward. (Alfa is selected
- * throughout.)
+ * its unread count still goes to Beta. A <title> element replaced by a new
+ * one is still counted. A click on a notification made by a script, not by
+ * the user, does not bring Beta forward. (Alfa is selected throughout.)
  */
 async function checkPageMessages(cdp, beta, failures) {
   const badge = (tab) => cdp.evaluate(
     `document.getElementById(${JSON.stringify(tab.id)})?.querySelector(".bg-red-600")?.textContent ?? ""`);
   const selected = (tab) => cdp.evaluate(
     `document.getElementById(${JSON.stringify(tab.id)}).getAttribute("aria-selected") === "true"`);
+  const replaceTitle = (text) => beta.evaluate(`(() => {
+    const title = document.createElement("title");
+    title.textContent = ${JSON.stringify(text)};
+    document.querySelector("title").replaceWith(title);
+  })()`);
   const clearCount = async () => {
-    await beta.evaluate(`document.title = "WhatsApp"`);
+    await replaceTitle("WhatsApp");
     await waitFor("Beta's count to clear", 5_000, async () => (await badge(BETA)) === "").catch(() => {});
   };
 
@@ -986,6 +991,14 @@ async function checkPageMessages(cdp, beta, failures) {
     }
   } finally {
     await beta.evaluate(`document.body.dataset.tabId = ${JSON.stringify(BETA.id)}`);
+  }
+  await clearCount();
+
+  await replaceTitle("(5) WhatsApp");
+  try {
+    await waitFor("the count in Beta's replaced <title>", 5_000, async () => (await badge(BETA)) === "5");
+  } catch {
+    failures.push(`a replaced <title> in Beta's page was not counted (Beta shows "${await badge(BETA)}")`);
   }
   await clearCount();
 
