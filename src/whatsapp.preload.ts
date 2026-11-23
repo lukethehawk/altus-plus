@@ -83,12 +83,8 @@ function registerTitleElementObserver() {
 
     try {
       const messageCount = getMessageCountFromTitle(title);
-      const tabId = document.body.dataset.tabId;
-
-      ipcRenderer.send("message-count", {
-        messageCount,
-        tabId,
-      });
+      // Main credits the count to this page's tab from its session.
+      ipcRenderer.send("message-count", { messageCount });
     } catch (error) {
       console.error(error);
     }
@@ -234,7 +230,6 @@ ipcRenderer.on("set-id", (e, id) => {
     // send back initial message count
     ipcRenderer.send("message-count", {
       messageCount: getMessageCountFromTitle(titleElement?.textContent ?? ""),
-      tabId: id,
     });
   }
 
@@ -265,10 +260,8 @@ type NotificationBridge = {
 const notificationBridge: NotificationBridge = {
   isMuted: () => isMuteActive(notificationsMutedUntil, Date.now()),
   labelTitle: (title) => labelNotificationTitle(notificationAccountName, title),
-  onClick: () => {
-    const tabId = document.body?.dataset.tabId;
-    if (tabId) ipcRenderer.send("notification-clicked", tabId);
-  },
+  // Main brings forward the tab of this page's session.
+  onClick: () => ipcRenderer.send("notification-clicked"),
 };
 
 // Serialized into the page's world: must not reference anything outside.
@@ -302,7 +295,11 @@ function installNotificationHooks(bridge: NotificationBridge) {
         return stub as unknown as AccountNotification;
       }
       super(bridge.labelTitle(String(title)), options);
-      this.addEventListener("click", () => bridge.onClick());
+      // Only the user's click on the notification, not a click event the
+      // page dispatches itself.
+      this.addEventListener("click", (event) => {
+        if (event.isTrusted) bridge.onClick();
+      });
     }
   }
 

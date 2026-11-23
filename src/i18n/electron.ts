@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { fallbackLanguage, Language } from "./langauges.config";
 import path from "path";
-import { ipcMain } from "electron";
+import { ipcMain, type WebContents } from "electron";
 import { isDev } from "../utils/isDev";
 
 export class ElectronI18N {
@@ -12,16 +12,19 @@ export class ElectronI18N {
   private languageLoadedCallback?: () => void;
   private didInitialize = false;
 
-  initialize = async () => {
-    ipcMain.handle("get-translations", async () => {
+  /** isAllowedSender: the app's own window; WhatsApp pages get nothing. */
+  initialize = async (isAllowedSender: (sender: WebContents) => boolean) => {
+    ipcMain.handle("get-translations", async (event) => {
+      if (!isAllowedSender(event.sender)) throw new Error("Unauthorized IPC sender for get-translations");
       return {
         current: this.translation,
         fallback: this.fallbackTranslation,
       };
     });
 
-    ipcMain.handle("key-missing", async (_, key: string) => {
-      this.keyMissing(key);
+    ipcMain.handle("key-missing", async (event, key: unknown) => {
+      if (!isAllowedSender(event.sender)) throw new Error("Unauthorized IPC sender for key-missing");
+      if (typeof key === "string") this.keyMissing(key);
     });
 
     try {
