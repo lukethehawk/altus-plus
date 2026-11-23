@@ -72,3 +72,13 @@ test("the one customUnInstall runs every uninstall step", () => {
     assert.match(installer, new RegExp(`!macro customUnInstall[\\s\\S]*!insertmacro ${macro}[\\s\\S]*!macroend`), macro);
   }
 });
+
+// Through cmd.exe, "taskkill" was looked up in the current folder first: the
+// installer's, or the folder it was started from (Downloads).
+test("the installer closes the original Altus with System32's taskkill, not through cmd.exe", () => {
+  const script = read("makers/nsis/replaceAltus.nsh");
+  assert.doesNotMatch(script, /cmd\.exe/);
+  const calls = script.match(/nsExec::Exec `[^`]*taskkill[^`]*`/g) ?? [];
+  assert.equal(calls.length, 2);
+  for (const call of calls) assert.ok(call.startsWith('nsExec::Exec `"$SYSDIR\taskkill.exe" '), call);
+});

@@ -299,9 +299,18 @@ fails it uploads no installer.
    and keeps the link registration and the autostart entry.
 9. Uninstalling removes the program, its link registration and its
    autostart entry, and keeps the profile.
+10. `Setup.exe /S /allusers --replace-altus` (an install for all users,
+    with administrator rights) while HKCU says the original Altus is
+    installed for the user in a folder holding a stand-in
+    `Uninstall Altus.exe` (a copy of `whoami.exe`) and a running stand-in
+    `Altus.exe` (a copy of `ping.exe`): the data moves to Altus +, the
+    running Altus is closed and its autostart entry removed, but the
+    stand-in uninstaller is neither run nor deleted. Any program the user
+    runs can write HKCU; the installer used to run that file with
+    administrator rights. Altus + is then uninstalled again.
 
 Failures attach logs and screenshots (`smoke-artifacts`) to the run. Checks
-7-9 install and uninstall for real, so they only run on GitHub's throwaway
+7-10 install and uninstall for real, so they only run on GitHub's throwaway
 runners. Locally, `yarn package -p win32` then `yarn smoke` runs checks 1-6
 on a temporary profile.
 
