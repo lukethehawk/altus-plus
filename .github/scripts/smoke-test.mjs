@@ -9,9 +9,10 @@
 //    the translations);
 // 2. a modified app.asar is refused at startup;
 // 3. a fresh profile (--user-data-dir) opens the window and a WhatsApp Web tab,
-//    with no errors in the app window; started by a whatsapp:// link, its
-//    only account opens the chat (and a run on its own profile never
-//    registers the app for the links);
+//    with no errors in the app window; a WhatsApp address that redirects to
+//    another site leaves the tab on WhatsApp, opening nothing; started by a
+//    whatsapp:// link, its only account opens the chat (and a run on its own
+//    profile never registers the app for the links);
 // 4. "Start in tray with Windows": started with the autostart flag the window
 //    stays hidden while the tab still loads; started by hand it opens.
 //    The profile starts without tabs.json, as if it were lost: the first
@@ -74,6 +75,7 @@
 // stopped by PID. Failures leave logs and screenshots in smoke-artifacts/.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -401,6 +403,61 @@ async function checkRunningApp(name, exe, args, expected, port) {
   return { failures, notes, output: app.output };
 }
 
+/** Where the test's redirect starts: a WhatsApp address no page uses. */
+const REDIRECT_START = "https://web.whatsapp.com/altus-plus-smoke-redirect";
+
+/**
+ * A WhatsApp address that answers with a redirect to another site (a local
+ * server of the test) is not followed: the tab stays on WhatsApp, and the
+ * other site is neither loaded in the account's session nor opened in the
+ * browser, so the server is never asked. A redirect emits no will-navigate:
+ * the tab used to load the other site.
+ */
+async function checkRedirectBlocked(cdp, port, failures) {
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    requests.push(request.url);
+    response.end("<title>Elsewhere</title>");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const elsewhere = `http://127.0.0.1:${server.address().port}/elsewhere`;
+  let page;
+  try {
+    const id = await cdp.evaluate('document.querySelector("webview").id.replace(/^webview-/, "")');
+    page = await connectToTab(port, id);
+    let redirected = false;
+    page.listeners.push(({ method, params }) => {
+      if (method !== "Fetch.requestPaused") return;
+      redirected = true;
+      page.send("Fetch.fulfillRequest", {
+        requestId: params.requestId,
+        responseCode: 302,
+        responseHeaders: [{ name: "Location", value: elsewhere }],
+      }).catch(() => {});
+    });
+    // Past WhatsApp's service worker, straight to the interception.
+    await page.send("Network.enable");
+    await page.send("Network.setBypassServiceWorker", { bypass: true });
+    await page.send("Fetch.enable", { patterns: [{ urlPattern: `${REDIRECT_START}*` }] });
+    await page.evaluate(`location.href = ${JSON.stringify(REDIRECT_START)}; true`);
+    await sleep(5000);
+    const url = await cdp.evaluate(webviewCall(id, "getURL"));
+    if (!redirected) {
+      failures.push("redirect: the test's WhatsApp address was never requested");
+    } else if (requests.length) {
+      failures.push(`a WhatsApp redirect to another site was followed: ${requests.length} request(s) reached it, the tab shows ${url}`);
+    } else if (!url.startsWith("https://web.whatsapp.com/")) {
+      failures.push(`after a redirect to another site the tab left WhatsApp for ${url}`);
+    }
+  } catch (error) {
+    failures.push(`redirect: ${error.message}`);
+  } finally {
+    await page?.send("Fetch.disable").catch(() => {});
+    page?.close();
+    server.close();
+  }
+}
+
 // --- checks ----------------------------------------------------------------
 
 async function checkFuses() {
@@ -636,6 +693,7 @@ async function checkFreshProfile() {
     tabNames: ["New Tab"],
     tabCount: 1,
     windowShown: true,
+    afterLoad: ({ cdp, port, failures }) => checkRedirectBlocked(cdp, port, failures),
   }, 9411);
   if (!fs.existsSync(path.join(profile, "tabs.json"))) result.failures.push("the app did not save its tabs in --user-data-dir");
   if (!realProfileExisted && fs.existsSync(realProfile)) {
@@ -1904,7 +1962,7 @@ function findInstaller() {
 const checks = [
   ["1. Fuses; app.asar has the bundles, page, icons and translations", checkFuses],
   ["2. Modified app.asar is refused", checkTamperedAsar],
-  ["3. Fresh profile: window, tab, WhatsApp Web, no errors; started by a whatsapp:// link", checkFreshProfile],
+  ["3. Fresh profile: window, tab, WhatsApp Web, no errors, redirect off WhatsApp cancelled; started by a whatsapp:// link", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account; unreadable saved files are set aside and the accounts come back", checkStartInTray],
   ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, counts and clicks tied to their tab, invalid tab and theme lists refused, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
   ["6. Resource test: title bar kept until restart, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],

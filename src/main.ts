@@ -745,6 +745,16 @@ if (!singleInstanceLock) {
           .openExternal(externalURL)
           .catch((error) => console.error("Failed to open external URL:", error));
       });
+      // A server redirect (a WhatsApp address answering with a redirect to
+      // another site) emits no will-navigate: the other site loaded inside
+      // the account's session. Cancelled, not opened in the browser: the
+      // user did not ask for that page.
+      webContents.on("will-redirect", (details) => {
+        if (!details.isMainFrame || isTrustedWhatsAppURL(details.url)) return;
+        details.preventDefault();
+        const where = URL.canParse(details.url) ? new URL(details.url).origin : "an invalid address";
+        console.warn(`Blocked a WhatsApp tab's redirect to ${where}`);
+      });
       // A crashed account reloads on its own without touching the others.
       recoverRendererOnFailure(webContents, "WhatsApp tab");
 

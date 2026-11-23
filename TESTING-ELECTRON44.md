@@ -181,7 +181,10 @@ fails it uploads no installer.
 3. On a fresh profile, the window loads in English with one tab. That tab
    reaches WhatsApp Web, and its preload reports the tab's ID. The app
    window has a Content-Security-Policy and logs no console errors,
-   exceptions or CSP violations.
+   exceptions or CSP violations. A WhatsApp address that answers with a
+   redirect to another site (a local server of the test) leaves the tab on
+   WhatsApp: the other site is neither loaded in the tab nor opened in the
+   browser (a redirect skipped the check that keeps the tab on WhatsApp).
 4. With "Start in tray with Windows" on, a start with `--hidden` (what the
    autostart entry runs) shows no window, yet the tab reaches WhatsApp
    Web. A start without it shows the window.
