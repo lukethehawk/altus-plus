@@ -258,6 +258,9 @@ fails it uploads no installer.
    Allow Moving Tabs (which reloads the page's settings) keeps the title bar
    until the restart; the restarted window has a frame and no custom title
    bar (the bar used to vanish at once, leaving a window without buttons).
+   The window's listeners get the message alone, not Electron's event
+   object, and the title bar's blur listener returns a remover that works
+   (seen by minimizing the window, when it has the focus).
    Help → Run Resource Test… → Restart and Measure restarts the app into
    the test with three tabs, which change their title every 20 ms
    beforehand, so unread counts keep arriving while the app closes (one

@@ -38,102 +38,42 @@ contextBridge.exposeInMainWorld(
   electronSettingsStoreIpcApi
 );
 
+/**
+ * Listens to a channel from the main process and returns the remover. The
+ * callback gets the message alone, not Electron's event object, which
+ * carries the sender and would cross into the page.
+ */
+function on<Message = void>(channel: string, callback: (message: Message) => void): () => void {
+  const listener = (_event: IpcRendererEvent, message: Message) => callback(message);
+  ipcRenderer.on(channel, listener);
+  return () => {
+    ipcRenderer.off(channel, listener);
+  };
+}
+
 const ipcHandlers: ElectronIPCHandlers = {
-  onOpenSettings: (callback) => {
-    ipcRenderer.on("open-settings", callback);
-    return () => ipcRenderer.off("open-settings", callback);
-  },
-  onEditActiveTab: (callback) => {
-    ipcRenderer.on("edit-active-tab", callback);
-    return () => ipcRenderer.off("edit-active-tab", callback);
-  },
-  onCloseActiveTab: (callback) => {
-    ipcRenderer.on("close-active-tab", callback);
-    return () => ipcRenderer.off("close-active-tab", callback);
-  },
-  onOpenTabDevTools: (callback) => {
-    ipcRenderer.on("open-tab-devtools", callback);
-    return () => ipcRenderer.off("open-tab-devtools", callback);
-  },
-  onAddNewTab: (callback) => {
-    ipcRenderer.on("add-new-tab", callback);
-    return () => ipcRenderer.off("add-new-tab", callback);
-  },
-  onRestoreTab: (callback) => {
-    ipcRenderer.on("restore-tab", callback);
-    return () => ipcRenderer.off("restore-tab", callback);
-  },
-  onNextTab: (callback) => {
-    ipcRenderer.on("next-tab", callback);
-    return () => ipcRenderer.off("next-tab", callback);
-  },
-  onPreviousTab: (callback) => {
-    ipcRenderer.on("previous-tab", callback);
-    return () => ipcRenderer.off("previous-tab", callback);
-  },
-  onFirstTab: (callback) => {
-    ipcRenderer.on("first-tab", callback);
-    return () => ipcRenderer.off("first-tab", callback);
-  },
-  onLastTab: (callback) => {
-    ipcRenderer.on("last-tab", callback);
-    return () => ipcRenderer.off("last-tab", callback);
-  },
-  onOpenWhatsappLink: (callback) => {
-    const handler = (_: IpcRendererEvent, url: string) => callback(url);
-    ipcRenderer.on("open-whatsapp-link", handler);
-    return () => ipcRenderer.off("open-whatsapp-link", handler);
-  },
+  onOpenSettings: (callback) => on("open-settings", callback),
+  onEditActiveTab: (callback) => on("edit-active-tab", callback),
+  onCloseActiveTab: (callback) => on("close-active-tab", callback),
+  onOpenTabDevTools: (callback) => on("open-tab-devtools", callback),
+  onAddNewTab: (callback) => on("add-new-tab", callback),
+  onRestoreTab: (callback) => on("restore-tab", callback),
+  onNextTab: (callback) => on("next-tab", callback),
+  onPreviousTab: (callback) => on("previous-tab", callback),
+  onFirstTab: (callback) => on("first-tab", callback),
+  onLastTab: (callback) => on("last-tab", callback),
+  onOpenWhatsappLink: (callback) => on("open-whatsapp-link", callback),
   whatsappLinksReady: () => ipcRenderer.invoke("whatsapp-links-ready"),
-  onReloadCustomTitleBar: (callback) => {
-    ipcRenderer.on("reload-custom-title-bar", callback);
-    return () => ipcRenderer.off("reload-custom-title-bar", callback);
-  },
-  onReloadTranslations: (callback) => {
-    ipcRenderer.on("reload-translations", callback);
-    return () => ipcRenderer.off("reload-translations", callback);
-  },
-  onReloadSettings: (callback) => {
-    ipcRenderer.on("reload-settings", callback);
-    return () => ipcRenderer.off("reload-settings", callback);
-  },
-  onNewChat: (callback) => {
-    ipcRenderer.on("new-chat", callback);
-    return () => ipcRenderer.off("new-chat", callback);
-  },
-  onOpenThemeManager: (callback) => {
-    ipcRenderer.on("open-theme-manager", callback);
-    return () => ipcRenderer.off("open-theme-manager", callback);
-  },
-  onOpenResourceUsage: (callback) => {
-    ipcRenderer.on("open-resource-usage", callback);
-    return () => ipcRenderer.off("open-resource-usage", callback);
-  },
-  onOpenResourceTest: (callback) => {
-    ipcRenderer.on("open-resource-test", callback);
-    return () => ipcRenderer.off("open-resource-test", callback);
-  },
-  onMessageCount: (callback) => {
-    const handler = (
-      _: IpcRendererEvent,
-      count: { messageCount: number; tabId: string }
-    ) => callback(count);
-    ipcRenderer.on("message-count", handler);
-    return () => ipcRenderer.off("message-count", handler);
-  },
-  onSelectTab: (callback) => {
-    const handler = (_: IpcRendererEvent, tabId: string) => callback(tabId);
-    ipcRenderer.on("select-tab", handler);
-    return () => ipcRenderer.off("select-tab", handler);
-  },
-  onDownloadCompleted: (callback) => {
-    const handler = (
-      _: IpcRendererEvent,
-      download: { id: number; filename: string }
-    ) => callback(download);
-    ipcRenderer.on("download-completed", handler);
-    return () => ipcRenderer.off("download-completed", handler);
-  },
+  onReloadCustomTitleBar: (callback) => on("reload-custom-title-bar", callback),
+  onReloadTranslations: (callback) => on("reload-translations", callback),
+  onReloadSettings: (callback) => on("reload-settings", callback),
+  onNewChat: (callback) => on("new-chat", callback),
+  onOpenThemeManager: (callback) => on("open-theme-manager", callback),
+  onOpenResourceUsage: (callback) => on("open-resource-usage", callback),
+  onOpenResourceTest: (callback) => on("open-resource-test", callback),
+  onMessageCount: (callback) => on("message-count", callback),
+  onSelectTab: (callback) => on("select-tab", callback),
+  onDownloadCompleted: (callback) => on("download-completed", callback),
 };
 
 contextBridge.exposeInMainWorld("showDownloadInFolder", (id: number) =>
@@ -187,8 +127,6 @@ contextBridge.exposeInMainWorld("windowActions", {
   close: () => ipcRenderer.invoke("close-window"),
   isMaximized: () => ipcRenderer.invoke("is-maximized"),
   isBlurred: () => ipcRenderer.invoke("is-blurred"),
-  onBlurred: (callback: () => void) =>
-    ipcRenderer.on("window-blurred", callback),
-  onFocused: (callback: () => void) =>
-    ipcRenderer.on("window-focused", callback),
+  onBlurred: (callback: () => void) => on("window-blurred", callback),
+  onFocused: (callback: () => void) => on("window-focused", callback),
 });

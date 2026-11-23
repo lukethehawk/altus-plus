@@ -44,7 +44,9 @@
 //    (Cancel opens nothing; a link that is not a chat or invite is ignored).
 //    It plays a near-silent tone and shows a silent notification for a moment;
 // 6. With the custom title bar, turning it off and reloading the page's
-//    settings keeps it until the restart, which comes without it.
+//    settings keeps it until the restart, which comes without it. The
+//    window's listeners get the message alone, not Electron's event, and
+//    the title bar's blur listener can be removed.
 //    Help → Run Resource Test restarts the app into the test, which records
 //    the three accounts into a CSV file; a file downloaded in a tab during
 //    the test lands in the folder from Settings with "Attachment saved";
@@ -1437,6 +1439,61 @@ async function checkTitlebarKept(cdp) {
 }
 
 /**
+ * The window's listeners for messages from main get the message alone, not
+ * Electron's event object (which carries the sender), and each returns a
+ * remover, the title bar's focus and blur listeners included (they had none).
+ */
+async function checkWindowListeners(cdp, notes) {
+  const failures = [];
+  try {
+    await cdp.evaluate(`(() => {
+      window.smokeMessages = [];
+      window.smokeStopMessages = window.electronIPCHandlers.onReloadSettings((...args) => window.smokeMessages.push(args));
+      return true;
+    })()`);
+    // Tab → Allow Moving Tabs: the page reloads its settings; again once
+    // the listener is removed.
+    await cdp.evaluate('window.electronSettingsStore.setSetting("tabReordering", true)');
+    await waitFor("the page to reload its settings", 5_000, () => cdp.evaluate("window.smokeMessages.length > 0")).catch(() => {});
+    await cdp.evaluate("window.smokeStopMessages()");
+    await cdp.evaluate('window.electronSettingsStore.setSetting("tabReordering", false)');
+    await sleep(1000);
+    const messages = await cdp.evaluate("window.smokeMessages");
+    if (messages.length !== 1) {
+      failures.push(`window listeners: ${messages.length} message(s) for one settings reload and one after removing the listener, expected 1`);
+    }
+    if (messages.flat().some((arg) => arg !== null)) {
+      failures.push(`window listeners: a listener got ${JSON.stringify(messages[0])}, not the message alone`);
+    }
+
+    const remover = await cdp.evaluate(`(() => {
+      window.smokeBlurs = { removed: 0, kept: 0 };
+      const stop = window.windowActions.onBlurred(() => window.smokeBlurs.removed++);
+      window.smokeStopBlurs = window.windowActions.onBlurred(() => window.smokeBlurs.kept++);
+      if (typeof stop !== "function") return typeof stop;
+      stop();
+      return "function";
+    })()`);
+    if (remover !== "function") {
+      failures.push(`window listeners: the title bar's blur listener returns ${remover}, not a remover`);
+    } else {
+      // Minimizing takes the focus away (if the window had it).
+      await cdp.evaluate("window.windowActions.minimize()");
+      await sleep(1000);
+      await cdp.evaluate("window.windowActions.restore()");
+      await sleep(1000);
+      const blurs = await cdp.evaluate("window.smokeBlurs");
+      if (blurs.removed) failures.push("window listeners: a removed blur listener still ran");
+      else if (!blurs.kept) notes.push("window listeners: the window lost no focus when minimized (it had none), removal not observed");
+    }
+    await cdp.evaluate('typeof window.smokeStopBlurs === "function" && window.smokeStopBlurs()');
+  } catch (error) {
+    failures.push(`window listeners: ${error.message}`);
+  }
+  return failures;
+}
+
+/**
  * An attachment downloaded during the resource test goes through electron-dl
  * like any other: into the folder from Settings, with "Attachment saved".
  * The test's first sample creates the tabs' sessions, which used to happen
@@ -1488,6 +1545,7 @@ async function checkResourceTest() {
     // Help → Run Resource Test… → Restart and Measure.
     cdp = await attachWhen(port, "Help → Run Resource Test", 90_000, async (page) => (await menuIds(page)).includes("resource-test"));
     failures.push(...(await checkTitlebarKept(cdp)));
+    failures.push(...(await checkWindowListeners(cdp, notes)));
     // Unread counts in flight while the app closes, as when the accounts sync
     // right after a start: every tab changes its title nonstop. A count that
     // reached the destroyed window stopped the restart with an error box.
@@ -1965,7 +2023,7 @@ const checks = [
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors, redirect off WhatsApp cancelled; started by a whatsapp:// link", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account; unreadable saved files are set aside and the accounts come back", checkStartInTray],
   ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, counts and clicks tied to their tab, invalid tab and theme lists refused, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
-  ["6. Resource test: title bar kept until restart, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
+  ["6. Resource test: title bar kept until restart, window listeners, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
 ];
 if (runInstaller) {
   checks.push(

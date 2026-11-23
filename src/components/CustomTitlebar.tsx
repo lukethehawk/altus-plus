@@ -9,6 +9,7 @@ import {
   Show,
   Switch,
   createSignal,
+  onCleanup,
 } from "solid-js";
 import { CloneableMenu } from "../main";
 import { Menubar } from "@kobalte/core";
@@ -120,8 +121,9 @@ const CustomTitlebar: Component<{
   window.windowActions.isMaximized().then(setMaximized).catch(console.error);
   window.windowActions.isBlurred().then(setBlurred).catch(console.error);
 
-  window.windowActions.onBlurred(() => setBlurred(true));
-  window.windowActions.onFocused(() => setBlurred(false));
+  // Removed with the bar, like the window's other listeners.
+  onCleanup(window.windowActions.onBlurred(() => setBlurred(true)));
+  onCleanup(window.windowActions.onFocused(() => setBlurred(false)));
 
   const toggleMaximize = async () => {
     if (maximized()) {
