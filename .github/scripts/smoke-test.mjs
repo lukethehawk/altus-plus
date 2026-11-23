@@ -28,7 +28,8 @@
 //    Permissions come from the main process: a location request is refused,
 //    and turning a tab's Notifications and Microphone and Camera off (in the
 //    saved tab list) makes it report and get "denied" at once, until they
-//    are turned on again.
+//    are turned on again. (The microphone only where WhatsApp's page allows
+//    it: its login page at times blocks it by Permissions-Policy.)
 //    The window cannot save a tab list main could misread (a tab ID that
 //    cannot name a partition folder, the same account twice, no list at
 //    all) or a theme list of the wrong shape; tabs as earlier versions saved
@@ -1085,14 +1086,24 @@ function exerciseBackgroundTabs(run, audio, profile) {
         const setBetaSwitches = (switches) => cdp.evaluate(`window.electronTabStore.set("tabs", ${JSON.stringify(
           BACKGROUND_TABS.map((tab) => (tab.id === BETA.id ? { ...tab, config: { ...tab.config, ...switches } } : tab))
         )})`);
+        // WhatsApp's login page, where the test's accounts stay, at times
+        // blocks the microphone and camera in its Permissions-Policy. Chromium
+        // then answers "denied" itself, without asking the app, so the
+        // Microphone and Camera switch only shows where the page allows them.
+        const microphoneAllowed = await pages[BETA.id].evaluate(`document.featurePolicy?.allowsFeature("microphone") ?? true`);
+        if (!microphoneAllowed) {
+          notes.push(`${run}: WhatsApp's page blocks the microphone (Permissions-Policy), so only the Notifications switch is checked`);
+        }
+        const answers = (state, expected) => state.permission === expected && state.requested === expected &&
+          (!microphoneAllowed || state.microphone === expected);
         await setBetaSwitches({ notifications: false, media: false });
         const off = await pages[BETA.id].evaluate(PERMISSION_STATE);
-        if (off.permission !== "denied" || off.requested !== "denied" || off.microphone !== "denied") {
+        if (!answers(off, "denied")) {
           failures.push(`Beta with Notifications and Microphone and Camera off: ${JSON.stringify(off)}`);
         }
         await setBetaSwitches({});
         const on = await pages[BETA.id].evaluate(PERMISSION_STATE);
-        if (on.permission !== "granted" || on.requested !== "granted" || on.microphone !== "granted") {
+        if (!answers(on, "granted")) {
           failures.push(`Beta with the switches on again: ${JSON.stringify(on)}`);
         }
       }

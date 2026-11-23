@@ -214,7 +214,13 @@ fails it uploads no installer.
      Microphone and Camera off in the saved tab list makes Beta report and
      get "denied" for both at once (`Notification.permission`, the
      notification request, the microphone check); turned on again, they
-     are granted again;
+     are granted again. WhatsApp's login page, where the test's accounts
+     stay, at times blocks the microphone and camera in its
+     Permissions-Policy: Chromium then reports the microphone as denied
+     without asking Altus +, whatever the switch says. When
+     `document.featurePolicy` shows that, only the Notifications switch is
+     checked, with a note; the switch logic itself is covered by
+     `tests/permissions.test.mjs`;
    - a tone started in Alfa and in Beta keeps running and Chromium reports
      both as playing, so neither was stopped or suspended. No tab is muted,
      which is checked on its own: Chromium reports a muted tab as playing
