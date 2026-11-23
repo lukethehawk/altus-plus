@@ -4,11 +4,8 @@ import { isMuteActive, labelNotificationTitle } from "./utils/notifications";
 import { formatSelectedText } from "./utils/webview/formatSelectedText";
 import { getLuminance } from "color2k";
 
-let titleElement: HTMLTitleElement | null = null;
-
-window.onload = () => {
-  titleElement = document.querySelector("title");
-
+// A listener, not window.onload, which the page could take over.
+window.addEventListener("load", () => {
   // Reset initial theme
   document.body.querySelectorAll("script").forEach((script) => {
     if (script.innerHTML.includes("systemThemeDark")) {
@@ -63,8 +60,8 @@ window.onload = () => {
     }
   });
 
-  registerTitleElementObserver();
-};
+  registerTitleObserver();
+});
 
 function getMessageCountFromTitle(title: string) {
   const title_regex = /([0-9]+)/;
@@ -74,25 +71,35 @@ function getMessageCountFromTitle(title: string) {
   return parseInt(exec[0], 10);
 }
 
-function registerTitleElementObserver() {
-  if (!titleElement) return;
-  const observedTitle = titleElement;
-  new MutationObserver(function () {
-    const title = observedTitle.textContent;
-    if (!title) return;
+let sentMessageCount: number | undefined;
 
+/**
+ * Sends the unread count in the page title when it changes (or always, for
+ * the first one). Main credits it to this page's tab from its session, so
+ * it carries no tab ID.
+ */
+function sendMessageCount(first = false) {
+  const title = document.title;
+  if (!first && !title) return;
+  const messageCount = getMessageCountFromTitle(title);
+  if (!first && messageCount === sentMessageCount) return;
+  sentMessageCount = messageCount;
+  ipcRenderer.send("message-count", { messageCount });
+}
+
+/**
+ * Watches the whole <head>, not one <title> element: a page that replaces
+ * the element (rather than its text) kept the old one watched, and the
+ * counts stopped without an error.
+ */
+function registerTitleObserver() {
+  new MutationObserver(() => {
     try {
-      const messageCount = getMessageCountFromTitle(title);
-      const tabId = document.body.dataset.tabId;
-
-      ipcRenderer.send("message-count", {
-        messageCount,
-        tabId,
-      });
+      sendMessageCount();
     } catch (error) {
       console.error(error);
     }
-  }).observe(observedTitle, {
+  }).observe(document.head, {
     subtree: true,
     childList: true,
     characterData: true,
@@ -230,14 +237,8 @@ ipcRenderer.on("format-text", (e, wrapper) => {
 });
 
 ipcRenderer.on("set-id", (e, id) => {
-  if (!document.body.dataset.tabId) {
-    // send back initial message count
-    ipcRenderer.send("message-count", {
-      messageCount: getMessageCountFromTitle(titleElement?.textContent ?? ""),
-      tabId: id,
-    });
-  }
-
+  // The first time: send back the initial message count.
+  if (!document.body.dataset.tabId) sendMessageCount(true);
   document.body.dataset.tabId = id;
 });
 
@@ -265,10 +266,8 @@ type NotificationBridge = {
 const notificationBridge: NotificationBridge = {
   isMuted: () => isMuteActive(notificationsMutedUntil, Date.now()),
   labelTitle: (title) => labelNotificationTitle(notificationAccountName, title),
-  onClick: () => {
-    const tabId = document.body?.dataset.tabId;
-    if (tabId) ipcRenderer.send("notification-clicked", tabId);
-  },
+  // Main brings forward the tab of this page's session.
+  onClick: () => ipcRenderer.send("notification-clicked"),
 };
 
 // Serialized into the page's world: must not reference anything outside.
@@ -302,7 +301,11 @@ function installNotificationHooks(bridge: NotificationBridge) {
         return stub as unknown as AccountNotification;
       }
       super(bridge.labelTitle(String(title)), options);
-      this.addEventListener("click", () => bridge.onClick());
+      // Only the user's click on the notification, not a click event the
+      // page dispatches itself.
+      this.addEventListener("click", (event) => {
+        if (event.isTrusted) bridge.onClick();
+      });
     }
   }
 

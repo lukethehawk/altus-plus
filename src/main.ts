@@ -88,6 +88,7 @@ import {
   setupAutoUpdater,
 } from "./updater";
 import { isAltusPartition, isTrustedWhatsAppURL, getSafeExternalHttpURL } from "./utils/security";
+import { TabSessions } from "./utils/tabSessions";
 import { allowPermissionCheck, allowPermissionRequest } from "./utils/permissions";
 import { isFullFolderPath } from "./utils/downloads";
 import {
@@ -979,6 +980,8 @@ function toggleTray(mainWindow: BrowserWindow, enabled: boolean) {
 
 /** Partitions whose permission handlers are set (once per session). */
 const partitionsWithPermissionHandlers = new Set<string>();
+// The tab of each tab session, for what its WhatsApp page reports.
+const tabSessions = new TabSessions<Electron.Session>();
 
 /**
  * Sets a tab's permission handlers when its webview attaches, before
@@ -991,6 +994,7 @@ function setUpTabPermissions(partition: string) {
   partitionsWithPermissionHandlers.add(partition);
   const switchesOf = () => savedTabs().find((tab) => `persist:${tab.id}` === partition)?.config;
   const tabSession = session.fromPartition(partition);
+  tabSessions.register(tabSession, partition);
   tabSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     // The frame asking, so that a page embedded in WhatsApp gets nothing.
     const fromWhatsApp = isTrustedWhatsAppURL(details.requestingUrl || contents.getURL());
@@ -1193,13 +1197,12 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
 
   // A notification of some account was clicked: show the window on that
   // account's tab. WhatsApp's own click handler then opens the chat.
-  ipcMain.on("notification-clicked", (event, tabId: unknown) => {
+  ipcMain.on("notification-clicked", (event) => {
     const { sender } = event;
     if (sender.getType() !== "webview" || !isTrustedWhatsAppURL(sender.getURL())) return;
-    if (typeof tabId !== "string" || !isAltusPartition(`persist:${tabId}`)) return;
-    if (!savedTabs().some((tab) => tab.id === tabId)) return;
-    // Only the tab's own session may bring that tab forward.
-    if (sender.session !== session.fromPartition(`persist:${tabId}`)) return;
+    // The tab of the page's own session, never one the page names.
+    const tabId = tabSessions.tabOf(sender.session);
+    if (tabId === undefined || !savedTabs().some((tab) => tab.id === tabId)) return;
     if (mainWindow.isDestroyed()) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
@@ -1230,8 +1233,11 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     if (mainWindow.isDestroyed()) return;
     if (event.sender.getType() !== "webview" || !isTrustedWhatsAppURL(event.sender.getURL())) return;
     if (!detail || typeof detail !== "object") return;
-    const { tabId, messageCount } = detail as { tabId?: unknown; messageCount?: unknown };
-    if (typeof tabId !== "string" || !Number.isSafeInteger(messageCount) ||
+    // The count is the page's own tab's: a page can rewrite the tab ID the
+    // window gave it, not the session it runs in.
+    const tabId = tabSessions.tabOf(event.sender.session);
+    const { messageCount } = detail as { messageCount?: unknown };
+    if (tabId === undefined || !Number.isSafeInteger(messageCount) ||
         (messageCount as number) < 0 || (messageCount as number) > 100000) return;
     const tabs = savedTabs();
     const activeIds = new Set(tabs.map((tab) => tab.id));
@@ -1321,7 +1327,8 @@ async function initializeI18N(mainWindow: BrowserWindow) {
   });
 
   try {
-    await electronI18N.initialize();
+    // Only the app's own window asks for its translations.
+    await electronI18N.initialize((sender) => sender === mainWindow.webContents);
 
     const savedLanguage = getSettingWithDefault("language");
     electronI18N.setLanguage(
