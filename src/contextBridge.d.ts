@@ -21,8 +21,10 @@ declare global {
       close: () => Promise<void>;
       isMaximized: () => Promise<boolean>;
       isBlurred: () => Promise<boolean>;
-      onBlurred: (callback: () => void) => void;
-      onFocused: (callback: () => void) => void;
+      /** Returns the remover. */
+      onBlurred: (callback: () => void) => () => void;
+      /** Returns the remover. */
+      onFocused: (callback: () => void) => () => void;
     };
     showMessageBox: (
       options: Electron.MessageBoxOptions

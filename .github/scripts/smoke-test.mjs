@@ -9,9 +9,11 @@
 //    the translations);
 // 2. a modified app.asar is refused at startup;
 // 3. a fresh profile (--user-data-dir) opens the window and a WhatsApp Web tab,
-//    with no errors in the app window; started by a whatsapp:// link, its
-//    only account opens the chat (and a run on its own profile never
-//    registers the app for the links);
+//    with no errors in the app window; a WhatsApp address that redirects to
+//    another site leaves the tab on WhatsApp, opening nothing; started by a
+//    whatsapp:// link, its only account opens the chat (and a run on its own
+//    profile never registers the app for the links), and the window opens
+//    on screen although its remembered position is on no connected display;
 // 4. "Start in tray with Windows": started with the autostart flag the window
 //    stays hidden while the tab still loads; started by hand it opens.
 //    The profile starts without tabs.json, as if it were lost: the first
@@ -43,7 +45,9 @@
 //    (Cancel opens nothing; a link that is not a chat or invite is ignored).
 //    It plays a near-silent tone and shows a silent notification for a moment;
 // 6. With the custom title bar, turning it off and reloading the page's
-//    settings keeps it until the restart, which comes without it.
+//    settings keeps it until the restart, which comes without it. The
+//    window's listeners get the message alone, not Electron's event, and
+//    the title bar's blur listener can be removed.
 //    Help → Run Resource Test restarts the app into the test, which records
 //    the three accounts into a CSV file; a file downloaded in a tab during
 //    the test lands in the folder from Settings with "Attachment saved";
@@ -74,6 +78,7 @@
 // stopped by PID. Failures leave logs and screenshots in smoke-artifacts/.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -401,6 +406,76 @@ async function checkRunningApp(name, exe, args, expected, port) {
   return { failures, notes, output: app.output };
 }
 
+// A window size and position saved on a display that is gone.
+const OFF_SCREEN_WINDOW = { x: -5000, y: -5000, width: 800, height: 600 };
+
+/**
+ * Where the app window is, and whether its top-left corner is on the screen
+ * it is nearest to (a few pixels of Windows' invisible frame allowed).
+ */
+const WINDOW_POSITION = `(() => {
+  const x = window.screenX;
+  const y = window.screenY;
+  const onScreen = x >= screen.availLeft - 16 && x < screen.availLeft + screen.availWidth - 100 &&
+    y >= screen.availTop - 16 && y < screen.availTop + screen.availHeight - 32;
+  return { x, y, onScreen };
+})()`;
+
+/** Where the test's redirect starts: a WhatsApp address no page uses. */
+const REDIRECT_START = "https://web.whatsapp.com/altus-plus-smoke-redirect";
+
+/**
+ * A WhatsApp address that answers with a redirect to another site (a local
+ * server of the test) is not followed: the tab stays on WhatsApp, and the
+ * other site is neither loaded in the account's session nor opened in the
+ * browser, so the server is never asked. A redirect emits no will-navigate:
+ * the tab used to load the other site.
+ */
+async function checkRedirectBlocked(cdp, port, failures) {
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    requests.push(request.url);
+    response.end("<title>Elsewhere</title>");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const elsewhere = `http://127.0.0.1:${server.address().port}/elsewhere`;
+  let page;
+  try {
+    const id = await cdp.evaluate('document.querySelector("webview").id.replace(/^webview-/, "")');
+    page = await connectToTab(port, id);
+    let redirected = false;
+    page.listeners.push(({ method, params }) => {
+      if (method !== "Fetch.requestPaused") return;
+      redirected = true;
+      page.send("Fetch.fulfillRequest", {
+        requestId: params.requestId,
+        responseCode: 302,
+        responseHeaders: [{ name: "Location", value: elsewhere }],
+      }).catch(() => {});
+    });
+    // Past WhatsApp's service worker, straight to the interception.
+    await page.send("Network.enable");
+    await page.send("Network.setBypassServiceWorker", { bypass: true });
+    await page.send("Fetch.enable", { patterns: [{ urlPattern: `${REDIRECT_START}*` }] });
+    await page.evaluate(`location.href = ${JSON.stringify(REDIRECT_START)}; true`);
+    await sleep(5000);
+    const url = await cdp.evaluate(webviewCall(id, "getURL"));
+    if (!redirected) {
+      failures.push("redirect: the test's WhatsApp address was never requested");
+    } else if (requests.length) {
+      failures.push(`a WhatsApp redirect to another site was followed: ${requests.length} request(s) reached it, the tab shows ${url}`);
+    } else if (!url.startsWith("https://web.whatsapp.com/")) {
+      failures.push(`after a redirect to another site the tab left WhatsApp for ${url}`);
+    }
+  } catch (error) {
+    failures.push(`redirect: ${error.message}`);
+  } finally {
+    await page?.send("Fetch.disable").catch(() => {});
+    page?.close();
+    server.close();
+  }
+}
+
 // --- checks ----------------------------------------------------------------
 
 async function checkFuses() {
@@ -599,6 +674,12 @@ async function checkLinkAtStart() {
   const failures = [];
   const profile = fs.mkdtempSync(path.join(TEMP, "as-p-"));
   const port = 9417;
+  // "Remember window position" on, with the position saved on a display
+  // that is no longer connected (far left of any screen).
+  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({
+    rememberWindowPosition: { value: true }, rememberWindowSize: { value: true },
+  }));
+  fs.writeFileSync(path.join(profile, "windowState.json"), JSON.stringify(OFF_SCREEN_WINDOW));
   const before = await readProtocolCommand();
   // Chromium reads no switches after "--": the port goes before it.
   const app = launch(PACKAGED_EXE, [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, "--", CHAT_LINK.link]);
@@ -613,6 +694,10 @@ async function checkLinkAtStart() {
       cdp.evaluate(`document.querySelector("webview")?.id.replace(/^webview-/, "") ?? null`));
     await waitFor("the link to open in the only account", 30_000, async () => (await openedLink(cdp, tab)) === CHAT_LINK.address);
     if (await linkDialog(cdp, [tab])) failures.push("with a single account, the app still asked which one opens the link");
+    const position = await cdp.evaluate(WINDOW_POSITION);
+    if (!position.onScreen) {
+      failures.push(`the window opened off screen at ${position.x}, ${position.y}, its remembered position on no connected display`);
+    }
   } catch (error) {
     failures.push(`started by a link: ${error.message}`);
   } finally {
@@ -636,6 +721,7 @@ async function checkFreshProfile() {
     tabNames: ["New Tab"],
     tabCount: 1,
     windowShown: true,
+    afterLoad: ({ cdp, port, failures }) => checkRedirectBlocked(cdp, port, failures),
   }, 9411);
   if (!fs.existsSync(path.join(profile, "tabs.json"))) result.failures.push("the app did not save its tabs in --user-data-dir");
   if (!realProfileExisted && fs.existsSync(realProfile)) {
@@ -1379,6 +1465,61 @@ async function checkTitlebarKept(cdp) {
 }
 
 /**
+ * The window's listeners for messages from main get the message alone, not
+ * Electron's event object (which carries the sender), and each returns a
+ * remover, the title bar's focus and blur listeners included (they had none).
+ */
+async function checkWindowListeners(cdp, notes) {
+  const failures = [];
+  try {
+    await cdp.evaluate(`(() => {
+      window.smokeMessages = [];
+      window.smokeStopMessages = window.electronIPCHandlers.onReloadSettings((...args) => window.smokeMessages.push(args));
+      return true;
+    })()`);
+    // Tab → Allow Moving Tabs: the page reloads its settings; again once
+    // the listener is removed.
+    await cdp.evaluate('window.electronSettingsStore.setSetting("tabReordering", true)');
+    await waitFor("the page to reload its settings", 5_000, () => cdp.evaluate("window.smokeMessages.length > 0")).catch(() => {});
+    await cdp.evaluate("window.smokeStopMessages()");
+    await cdp.evaluate('window.electronSettingsStore.setSetting("tabReordering", false)');
+    await sleep(1000);
+    const messages = await cdp.evaluate("window.smokeMessages");
+    if (messages.length !== 1) {
+      failures.push(`window listeners: ${messages.length} message(s) for one settings reload and one after removing the listener, expected 1`);
+    }
+    if (messages.flat().some((arg) => arg !== null)) {
+      failures.push(`window listeners: a listener got ${JSON.stringify(messages[0])}, not the message alone`);
+    }
+
+    const remover = await cdp.evaluate(`(() => {
+      window.smokeBlurs = { removed: 0, kept: 0 };
+      const stop = window.windowActions.onBlurred(() => window.smokeBlurs.removed++);
+      window.smokeStopBlurs = window.windowActions.onBlurred(() => window.smokeBlurs.kept++);
+      if (typeof stop !== "function") return typeof stop;
+      stop();
+      return "function";
+    })()`);
+    if (remover !== "function") {
+      failures.push(`window listeners: the title bar's blur listener returns ${remover}, not a remover`);
+    } else {
+      // Minimizing takes the focus away (if the window had it).
+      await cdp.evaluate("window.windowActions.minimize()");
+      await sleep(1000);
+      await cdp.evaluate("window.windowActions.restore()");
+      await sleep(1000);
+      const blurs = await cdp.evaluate("window.smokeBlurs");
+      if (blurs.removed) failures.push("window listeners: a removed blur listener still ran");
+      else if (!blurs.kept) notes.push("window listeners: the window lost no focus when minimized (it had none), removal not observed");
+    }
+    await cdp.evaluate('typeof window.smokeStopBlurs === "function" && window.smokeStopBlurs()');
+  } catch (error) {
+    failures.push(`window listeners: ${error.message}`);
+  }
+  return failures;
+}
+
+/**
  * An attachment downloaded during the resource test goes through electron-dl
  * like any other: into the folder from Settings, with "Attachment saved".
  * The test's first sample creates the tabs' sessions, which used to happen
@@ -1430,6 +1571,7 @@ async function checkResourceTest() {
     // Help → Run Resource Test… → Restart and Measure.
     cdp = await attachWhen(port, "Help → Run Resource Test", 90_000, async (page) => (await menuIds(page)).includes("resource-test"));
     failures.push(...(await checkTitlebarKept(cdp)));
+    failures.push(...(await checkWindowListeners(cdp, notes)));
     // Unread counts in flight while the app closes, as when the accounts sync
     // right after a start: every tab changes its title nonstop. A count that
     // reached the destroyed window stopped the restart with an error box.
@@ -1904,10 +2046,10 @@ function findInstaller() {
 const checks = [
   ["1. Fuses; app.asar has the bundles, page, icons and translations", checkFuses],
   ["2. Modified app.asar is refused", checkTamperedAsar],
-  ["3. Fresh profile: window, tab, WhatsApp Web, no errors; started by a whatsapp:// link", checkFreshProfile],
+  ["3. Fresh profile: window, tab, WhatsApp Web, no errors, redirect off WhatsApp cancelled; started by a whatsapp:// link, on screen though remembered off it", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account; unreadable saved files are set aside and the accounts come back", checkStartInTray],
   ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, counts and clicks tied to their tab, invalid tab and theme lists refused, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
-  ["6. Resource test: title bar kept until restart, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
+  ["6. Resource test: title bar kept until restart, window listeners, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
 ];
 if (runInstaller) {
   checks.push(

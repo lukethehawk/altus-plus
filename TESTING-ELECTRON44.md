@@ -181,7 +181,13 @@ fails it uploads no installer.
 3. On a fresh profile, the window loads in English with one tab. That tab
    reaches WhatsApp Web, and its preload reports the tab's ID. The app
    window has a Content-Security-Policy and logs no console errors,
-   exceptions or CSP violations.
+   exceptions or CSP violations. A WhatsApp address that answers with a
+   redirect to another site (a local server of the test) leaves the tab on
+   WhatsApp: the other site is neither loaded in the tab nor opened in the
+   browser (a redirect skipped the check that keeps the tab on WhatsApp).
+   Started by a `whatsapp://` link, the only account opens the chat; with
+   "Remember window position" on and the position saved at -5000, -5000 (a
+   display no longer connected), the window opens on screen.
 4. With "Start in tray with Windows" on, a start with `--hidden` (what the
    autostart entry runs) shows no window, yet the tab reaches WhatsApp
    Web. A start without it shows the window.
@@ -255,6 +261,9 @@ fails it uploads no installer.
    Allow Moving Tabs (which reloads the page's settings) keeps the title bar
    until the restart; the restarted window has a frame and no custom title
    bar (the bar used to vanish at once, leaving a window without buttons).
+   The window's listeners get the message alone, not Electron's event
+   object, and the title bar's blur listener returns a remover that works
+   (seen by minimizing the window, when it has the focus).
    Help → Run Resource Test… → Restart and Measure restarts the app into
    the test with three tabs, which change their title every 20 ms
    beforehand, so unread counts keep arriving while the app closes (one
