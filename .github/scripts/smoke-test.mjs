@@ -12,7 +12,8 @@
 //    with no errors in the app window; a WhatsApp address that redirects to
 //    another site leaves the tab on WhatsApp, opening nothing; started by a
 //    whatsapp:// link, its only account opens the chat (and a run on its own
-//    profile never registers the app for the links);
+//    profile never registers the app for the links), and the window opens
+//    on screen although its remembered position is on no connected display;
 // 4. "Start in tray with Windows": started with the autostart flag the window
 //    stays hidden while the tab still loads; started by hand it opens.
 //    The profile starts without tabs.json, as if it were lost: the first
@@ -405,6 +406,21 @@ async function checkRunningApp(name, exe, args, expected, port) {
   return { failures, notes, output: app.output };
 }
 
+// A window size and position saved on a display that is gone.
+const OFF_SCREEN_WINDOW = { x: -5000, y: -5000, width: 800, height: 600 };
+
+/**
+ * Where the app window is, and whether its top-left corner is on the screen
+ * it is nearest to (a few pixels of Windows' invisible frame allowed).
+ */
+const WINDOW_POSITION = `(() => {
+  const x = window.screenX;
+  const y = window.screenY;
+  const onScreen = x >= screen.availLeft - 16 && x < screen.availLeft + screen.availWidth - 100 &&
+    y >= screen.availTop - 16 && y < screen.availTop + screen.availHeight - 32;
+  return { x, y, onScreen };
+})()`;
+
 /** Where the test's redirect starts: a WhatsApp address no page uses. */
 const REDIRECT_START = "https://web.whatsapp.com/altus-plus-smoke-redirect";
 
@@ -658,6 +674,12 @@ async function checkLinkAtStart() {
   const failures = [];
   const profile = fs.mkdtempSync(path.join(TEMP, "as-p-"));
   const port = 9417;
+  // "Remember window position" on, with the position saved on a display
+  // that is no longer connected (far left of any screen).
+  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({
+    rememberWindowPosition: { value: true }, rememberWindowSize: { value: true },
+  }));
+  fs.writeFileSync(path.join(profile, "windowState.json"), JSON.stringify(OFF_SCREEN_WINDOW));
   const before = await readProtocolCommand();
   // Chromium reads no switches after "--": the port goes before it.
   const app = launch(PACKAGED_EXE, [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, "--", CHAT_LINK.link]);
@@ -672,6 +694,10 @@ async function checkLinkAtStart() {
       cdp.evaluate(`document.querySelector("webview")?.id.replace(/^webview-/, "") ?? null`));
     await waitFor("the link to open in the only account", 30_000, async () => (await openedLink(cdp, tab)) === CHAT_LINK.address);
     if (await linkDialog(cdp, [tab])) failures.push("with a single account, the app still asked which one opens the link");
+    const position = await cdp.evaluate(WINDOW_POSITION);
+    if (!position.onScreen) {
+      failures.push(`the window opened off screen at ${position.x}, ${position.y}, its remembered position on no connected display`);
+    }
   } catch (error) {
     failures.push(`started by a link: ${error.message}`);
   } finally {
@@ -2020,7 +2046,7 @@ function findInstaller() {
 const checks = [
   ["1. Fuses; app.asar has the bundles, page, icons and translations", checkFuses],
   ["2. Modified app.asar is refused", checkTamperedAsar],
-  ["3. Fresh profile: window, tab, WhatsApp Web, no errors, redirect off WhatsApp cancelled; started by a whatsapp:// link", checkFreshProfile],
+  ["3. Fresh profile: window, tab, WhatsApp Web, no errors, redirect off WhatsApp cancelled; started by a whatsapp:// link, on screen though remembered off it", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account; unreadable saved files are set aside and the accounts come back", checkStartInTray],
   ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, counts and clicks tied to their tab, invalid tab and theme lists refused, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
   ["6. Resource test: title bar kept until restart, window listeners, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],

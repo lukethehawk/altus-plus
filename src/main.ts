@@ -9,6 +9,7 @@ import {
   Menu,
   MenuItem,
   nativeImage,
+  screen,
   session,
   shell,
   Tray,
@@ -24,6 +25,7 @@ import { ThemeStore } from "./stores/themes/common";
 import { isValidTabStoreValue, isValidThemeStoreValue, usableTabs } from "./utils/storeValidation";
 import { electronSettingsStore } from "./stores/settings/electron";
 import { openStore, setAsideStores } from "./stores/openStore";
+import { positionOnScreen } from "./utils/windowPosition";
 import {
   fallbackLanguage,
   isSupportedLanguage,
@@ -488,14 +490,24 @@ function createWindow() {
   const rememberWindowPosition = getSettingWithDefault(
     "rememberWindowPosition"
   );
+  const width = rememberWindowSize ? windowState.get("width") || 800 : undefined;
+  const height = rememberWindowSize ? windowState.get("height") || 600 : undefined;
+  // Only where the window can be seen: the display it was on may be gone.
+  const position = rememberWindowPosition
+    ? positionOnScreen(
+        { x: windowState.get("x"), y: windowState.get("y") },
+        { width: width ?? 800, height: height ?? 600 },
+        screen.getAllDisplays().map((display) => display.workArea)
+      )
+    : undefined;
 
   const mainWindow = new BrowserWindow({
     minWidth: 520,
     minHeight: 395,
-    width: rememberWindowSize ? windowState.get("width") || 800 : undefined,
-    height: rememberWindowSize ? windowState.get("height") || 600 : undefined,
-    x: rememberWindowPosition ? windowState.get("x") ?? undefined : undefined,
-    y: rememberWindowPosition ? windowState.get("y") ?? undefined : undefined,
+    width,
+    height,
+    x: position?.x,
+    y: position?.y,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       webviewTag: true,

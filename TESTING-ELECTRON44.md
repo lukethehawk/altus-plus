@@ -185,6 +185,9 @@ fails it uploads no installer.
    redirect to another site (a local server of the test) leaves the tab on
    WhatsApp: the other site is neither loaded in the tab nor opened in the
    browser (a redirect skipped the check that keeps the tab on WhatsApp).
+   Started by a `whatsapp://` link, the only account opens the chat; with
+   "Remember window position" on and the position saved at -5000, -5000 (a
+   display no longer connected), the window opens on screen.
 4. With "Start in tray with Windows" on, a start with `--hidden` (what the
    autostart entry runs) shows no window, yet the tab reaches WhatsApp
    Web. A start without it shows the window.
