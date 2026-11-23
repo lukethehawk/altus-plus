@@ -193,6 +193,17 @@ fails it uploads no installer.
    the tab list did not name), delete the closed tab's folder and drop it
    from `closed-tabs.json`. Closing the new tab by hand then records it
    there.
+
+   A third profile holds `settings.json` cut off mid-write, a `tabs.json`
+   of NUL bytes (as a power cut can leave), `themes.json` and
+   `windowState.json` that are not JSON, two account folders, the folder
+   of a tab closed earlier and a stray file in `Partitions`. The app must
+   start anyway, in English with the window shown (the default settings),
+   with the tabs "Account 1" and "Account 2" on the two account folders, and
+   show the notice "Some saved data could not be read". Each unreadable
+   file is kept, byte for byte, as `<name>.corrupt-<date>_<time>.json`;
+   no account folder is deleted, not even the closed tab's, and
+   `closed-tabs.json` still lists it.
 5. Three tabs: "Alfa" selected, "Beta" and "Gamma" in the background,
    Gamma with notifications muted. Run with the window shown and again
    started into the tray (`--hidden`):

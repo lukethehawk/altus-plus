@@ -23,6 +23,7 @@ import { electronThemeStore } from "./stores/themes/electron";
 import { ThemeStore } from "./stores/themes/common";
 import { isValidTabStoreValue, isValidThemeStoreValue, usableTabs } from "./utils/storeValidation";
 import { electronSettingsStore } from "./stores/settings/electron";
+import { openStore, setAsideStores } from "./stores/openStore";
 import {
   fallbackLanguage,
   isSupportedLanguage,
@@ -97,7 +98,7 @@ import {
 } from "./utils/whatsappLinks";
 import { SettingsSchema } from "./stores/settings/common";
 
-const windowState = new Store<{
+const windowState = openStore<{
   width: number | null;
   height: number | null;
   x: number | null;
@@ -421,6 +422,51 @@ function confirmAndExit() {
     });
 }
 
+/**
+ * Once the window is on screen: which saved files could not be read at this
+ * start, what took their place, and where they were kept. The window size
+ * is left out: it only went back to the default.
+ */
+function showSetAsideNotice(mainWindow: BrowserWindow) {
+  const notable = setAsideStores.filter(({ name }) => name !== "windowState");
+  if (notable.length === 0) return;
+  const lines = notable.map(({ name, rebuiltTabs }) => {
+    if (name === "tabs") {
+      return rebuiltTabs
+        ? electronI18N.t("Tabs: your accounts were reopened from their data as Account 1, Account 2 and so on. Rename them with Tab → Edit Active Tab.")
+        : electronI18N.t("Tabs: a new tab was opened.");
+    }
+    if (name === "settings") return electronI18N.t("Settings: back to their defaults. Launch at system startup and Open whatsapp:// links are off until you turn them on again in Settings.");
+    return electronI18N.t("Themes: back to the built-in ones.");
+  });
+  const show = () => {
+    if (mainWindow.isDestroyed()) return;
+    void dialog
+      .showMessageBox(mainWindow, {
+        type: "warning",
+        title: electronI18N.t("Some saved data could not be read"),
+        message: electronI18N.t("Some saved data could not be read"),
+        detail: [
+          ...lines,
+          "",
+          electronI18N.t("The unreadable files were kept in the profile folder:"),
+          ...notable.map(({ copy }) => copy),
+        ].join("\n"),
+        buttons: [electronI18N.t("OK"), electronI18N.t("Show Files")],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        icon: mainIcon,
+      })
+      .then(({ response }) => {
+        if (response === 1) shell.showItemInFolder(path.join(app.getPath("userData"), notable[0].copy));
+      });
+  };
+  // Started into the tray: when the window is first opened.
+  if (mainWindow.isVisible()) show();
+  else mainWindow.once("show", show);
+}
+
 function quitApp() {
   const shouldPrompt = getSettingWithDefault("exitPrompt");
   if (shouldPrompt) confirmAndExit();
@@ -518,6 +564,7 @@ function createWindow() {
       mainWindow.show();
       mainWindow.focus();
     }
+    showSetAsideNotice(mainWindow);
   });
 
   changeAutoHideMenuBar(mainWindow, getSettingWithDefault("autoHideMenuBar"));
@@ -594,11 +641,15 @@ if (!singleInstanceLock) {
     // Kept until the window can ask which account opens it.
     handleWhatsappLinks(process.argv);
 
-    pruneUnusedPartitions(
-      electronTabStore.get("tabs"),
-      electronTabStore.get("previouslyClosedTab"),
-      app.getPath("userData")
-    );
+    // A start that rebuilt the tab list deletes no account folder: which
+    // closed tab could still be reopened was lost with the list.
+    if (!setAsideStores.some(({ name }) => name === "tabs")) {
+      pruneUnusedPartitions(
+        electronTabStore.get("tabs"),
+        electronTabStore.get("previouslyClosedTab"),
+        app.getPath("userData")
+      );
+    }
     startupTimes.partitionsCheckedAt = startupMoment("partitions");
 
     // A smoke-test run on a throwaway profile must not rewrite the autostart

@@ -212,5 +212,13 @@
   "Which account should open it?": "Con quale account vuoi aprirlo?",
   "Chat with {number}": "Chat con {number}",
   "Group invite": "Invito a un gruppo",
-  "A message to send to a chat of your choice": "Un messaggio da inviare alla chat che scegli"
+  "A message to send to a chat of your choice": "Un messaggio da inviare alla chat che scegli",
+  "Some saved data could not be read": "Alcuni dati salvati non erano leggibili",
+  "Tabs: your accounts were reopened from their data as Account 1, Account 2 and so on. Rename them with Tab → Edit Active Tab.": "Schede: gli account sono stati riaperti dai loro dati come Account 1, Account 2 e così via. Rinominali da Scheda → Modifica la scheda attiva.",
+  "Tabs: a new tab was opened.": "Schede: è stata aperta una nuova scheda.",
+  "Settings: back to their defaults. Launch at system startup and Open whatsapp:// links are off until you turn them on again in Settings.": "Impostazioni: tornate ai valori predefiniti. «Avvia all'accesso al sistema» e «Apri i link whatsapp://» sono spenti finché non li riaccendi in Impostazioni.",
+  "Themes: back to the built-in ones.": "Temi: tornati a quelli predefiniti.",
+  "The unreadable files were kept in the profile folder:": "I file illeggibili sono stati conservati nella cartella del profilo:",
+  "OK": "OK",
+  "Show Files": "Mostra i file"
 }

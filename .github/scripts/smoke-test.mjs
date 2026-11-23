@@ -17,7 +17,11 @@
 //    The profile starts without tabs.json, as if it were lost: the first
 //    start saves a new tab, and the second one must keep the data of the
 //    accounts the list no longer names (it used to delete them), delete only
-//    the folder of a tab closed earlier, and record the tab closed by hand;
+//    the folder of a tab closed earlier, and record the tab closed by hand.
+//    Saved files left unreadable (cut off, NUL bytes) no longer stop the
+//    start: each is kept as <name>.corrupt-<time>.json, the app starts with
+//    defaults and says so, and the tab list is rebuilt from the account
+//    folders (minus the tab closed earlier), deleting nothing;
 // 5. tabs in the background, also with the whole app in the tray, keep
 //    playing sound (also after switching tab) and show notifications labelled
 //    with their account, and a muted account's notification is suppressed.
@@ -152,6 +156,38 @@ public static class SmokeWindows {
   const count = Number.parseInt(result.stdout.trim(), 10);
   if (Number.isNaN(count)) throw new Error(`could not read the app's windows: ${result.stderr.trim().slice(0, 200)}`);
   return count;
+}
+
+/** Titles of the message boxes (Win32 dialog class #32770) a process shows. */
+function visibleDialogTitles(pid) {
+  const script = `
+Add-Type @"
+using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
+public static class SmokeDialogs {
+  public delegate bool Callback(IntPtr window, IntPtr data);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(Callback callback, IntPtr data);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr window, StringBuilder name, int size);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr window, StringBuilder text, int size);
+  public static string Titles(uint pid) {
+    var titles = new List<string>();
+    EnumWindows((window, data) => {
+      uint owner; GetWindowThreadProcessId(window, out owner);
+      var name = new StringBuilder(64); GetClassName(window, name, 64);
+      if (owner == pid && name.ToString() == "#32770" && IsWindowVisible(window)) {
+        var text = new StringBuilder(256); GetWindowText(window, text, 256); titles.Add(text.ToString());
+      }
+      return true;
+    }, IntPtr.Zero);
+    return string.Join("\\n", titles);
+  }
+}
+"@
+[SmokeDialogs]::Titles(${Number(pid)})`;
+  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(`could not read the app's dialogs: ${result.stderr.trim().slice(0, 200)}`);
+  return result.stdout.trim().split("\n").map((title) => title.trim()).filter(Boolean);
 }
 
 async function targets(port) {
@@ -336,7 +372,7 @@ async function checkRunningApp(name, exe, args, expected, port) {
 
     // Further checks on the loaded tabs, unless they did not all load.
     if (expected.afterLoad && failures.length === loadFailures) {
-      await expected.afterLoad({ cdp, port, failures, notes });
+      await expected.afterLoad({ cdp, port, failures, notes, app });
     }
 
     await sleep(3000);
@@ -668,14 +704,88 @@ async function checkStartInTray() {
     dataFailures.push(`closed-tabs.json lists ${JSON.stringify(recorded)} instead of the tab closed by hand`);
   }
   removeTemp(profile);
+  const unreadable = await checkUnreadableStores();
   return {
     failures: [
       ...atLogin.failures.map((line) => `with Windows: ${line}`),
       ...byHand.failures.map((line) => `by hand: ${line}`),
       ...dataFailures.map((line) => `account data: ${line}`),
+      ...unreadable.failures.map((line) => `unreadable files: ${line}`),
     ],
-    notes: [...atLogin.notes, ...byHand.notes],
+    notes: [...atLogin.notes, ...byHand.notes, ...unreadable.notes],
   };
+}
+
+// Saved files a power cut or a disk fault left unreadable, in a profile that
+// holds two accounts, a tab closed earlier and a stray file.
+const REBUILT_ACCOUNT_FOLDERS = ["smokerebuiltalfa01", "smokerebuiltbeta02"];
+const REBUILT_CLOSED_TAB = "SmokeRebuiltClosed3";
+const UNREADABLE_FILES = {
+  // Cut off mid-write; Italian and Start in tray would show if it were read.
+  settings: '{"language":{"value":"it"},"launchToTray":{"value":true},"tabBar":',
+  tabs: Buffer.alloc(512),
+  themes: "not JSON",
+  windowState: "{",
+};
+const UNREADABLE_NOTICE_TITLE = "Some saved data could not be read";
+
+/**
+ * Unreadable settings, tabs, themes and window size: the app still starts,
+ * on defaults (English, window shown), with the accounts rebuilt as
+ * "Account 1" and "Account 2" from their folders and a notice; each file is
+ * kept, byte for byte, next to the new one; nothing is deleted.
+ */
+async function checkUnreadableStores() {
+  const profile = fs.mkdtempSync(path.join(TEMP, "as-p-"));
+  for (const [name, contents] of Object.entries(UNREADABLE_FILES)) fs.writeFileSync(path.join(profile, `${name}.json`), contents);
+  const partitions = path.join(profile, "Partitions");
+  for (const folder of [...REBUILT_ACCOUNT_FOLDERS, REBUILT_CLOSED_TAB.toLowerCase()]) {
+    fs.mkdirSync(path.join(partitions, folder), { recursive: true });
+    fs.writeFileSync(path.join(partitions, folder, "marker"), "");
+  }
+  fs.writeFileSync(path.join(partitions, "smokestrayfile"), "");
+  fs.writeFileSync(path.join(profile, "closed-tabs.json"), JSON.stringify({ ids: [REBUILT_CLOSED_TAB] }));
+
+  const result = await checkRunningApp("unreadable-stores", PACKAGED_EXE, [`--user-data-dir=${profile}`], {
+    label: ADD_TAB_LABEL.en,
+    otherLabel: ADD_TAB_LABEL.it,
+    tabNames: ["Account 1", "Account 2"],
+    tabIds: REBUILT_ACCOUNT_FOLDERS,
+    tabCount: REBUILT_ACCOUNT_FOLDERS.length,
+    windowShown: true,
+    afterLoad: async ({ app, failures }) => {
+      try {
+        await waitFor("the notice about the unreadable files", 15_000, () =>
+          visibleDialogTitles(app.child.pid).includes(UNREADABLE_NOTICE_TITLE));
+      } catch (error) {
+        failures.push(error.message);
+      }
+    },
+  }, 9419);
+
+  const files = fs.readdirSync(profile);
+  for (const [name, contents] of Object.entries(UNREADABLE_FILES)) {
+    const copies = files.filter((file) => new RegExp(`^${name}\\.corrupt-\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}-\\d{2}\\.json$`).test(file));
+    if (copies.length !== 1) {
+      result.failures.push(`${name}.json: ${copies.length} copies of the unreadable file instead of one`);
+    } else if (!fs.readFileSync(path.join(profile, copies[0])).equals(Buffer.from(contents))) {
+      result.failures.push(`${copies[0]} does not hold the unreadable file's bytes`);
+    }
+  }
+  try {
+    const saved = readJson(path.join(profile, "tabs.json"));
+    const names = saved.tabs.map((tab) => `${tab.id}=${tab.name}`);
+    if (!sameJson(names, ["smokerebuiltalfa01=Account 1", "smokerebuiltbeta02=Account 2"])) {
+      result.failures.push(`the new tabs.json holds ${names.join(", ")}`);
+    }
+  } catch (error) {
+    result.failures.push(`the new tabs.json cannot be read: ${error.message}`);
+  }
+  const deleted = [...REBUILT_ACCOUNT_FOLDERS, REBUILT_CLOSED_TAB.toLowerCase()].filter((folder) => !fs.existsSync(path.join(partitions, folder, "marker")));
+  if (deleted.length) result.failures.push(`deleted account data while rebuilding the tab list: ${deleted.join(", ")}`);
+  if (!recordedClosedTabs(profile).includes(REBUILT_CLOSED_TAB)) result.failures.push("forgot the tab closed earlier in closed-tabs.json");
+  removeTemp(profile);
+  return result;
 }
 
 // --- check 5: background tabs ----------------------------------------------
@@ -1726,7 +1836,7 @@ const checks = [
   ["1. Fuses; app.asar has the bundles, page, icons and translations", checkFuses],
   ["2. Modified app.asar is refused", checkTamperedAsar],
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors; started by a whatsapp:// link", checkFreshProfile],
-  ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account", checkStartInTray],
+  ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account; unreadable saved files are set aside and the accounts come back", checkStartInTray],
   ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, invalid tab and theme lists refused, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
   ["6. Resource test: title bar kept until restart, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
 ];
