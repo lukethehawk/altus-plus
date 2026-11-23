@@ -10,7 +10,7 @@ import path from "path";
 
 /** Tab IDs (nanoid). Chromium lower-cases them for the folder names. */
 export const TAB_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const PARTITION_FOLDER = /^[a-z0-9_-]{1,64}$/;
+export const PARTITION_FOLDER = /^[a-z0-9_-]{1,64}$/;
 
 /** Where the closed tabs wait for their folders to be deleted. */
 export const CLOSED_TABS_FILE = "closed-tabs.json";

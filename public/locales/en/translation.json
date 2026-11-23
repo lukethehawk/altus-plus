@@ -212,5 +212,13 @@
   "Which account should open it?": "Which account should open it?",
   "Chat with {number}": "Chat with {number}",
   "Group invite": "Group invite",
-  "A message to send to a chat of your choice": "A message to send to a chat of your choice"
+  "A message to send to a chat of your choice": "A message to send to a chat of your choice",
+  "Some saved data could not be read": "Some saved data could not be read",
+  "Tabs: your accounts were reopened from their data as Account 1, Account 2 and so on. Rename them with Tab → Edit Active Tab.": "Tabs: your accounts were reopened from their data as Account 1, Account 2 and so on. Rename them with Tab → Edit Active Tab.",
+  "Tabs: a new tab was opened.": "Tabs: a new tab was opened.",
+  "Settings: back to their defaults. Launch at system startup and Open whatsapp:// links are off until you turn them on again in Settings.": "Settings: back to their defaults. Launch at system startup and Open whatsapp:// links are off until you turn them on again in Settings.",
+  "Themes: back to the built-in ones.": "Themes: back to the built-in ones.",
+  "The unreadable files were kept in the profile folder:": "The unreadable files were kept in the profile folder:",
+  "OK": "OK",
+  "Show Files": "Show Files"
 }
