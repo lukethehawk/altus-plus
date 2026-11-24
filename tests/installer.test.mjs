@@ -80,5 +80,5 @@ test("the installer closes the original Altus with System32's taskkill, not thro
   assert.doesNotMatch(script, /cmd\.exe/);
   const calls = script.match(/nsExec::Exec `[^`]*taskkill[^`]*`/g) ?? [];
   assert.equal(calls.length, 2);
-  for (const call of calls) assert.ok(call.startsWith('nsExec::Exec `"$SYSDIR\taskkill.exe" '), call);
+  for (const call of calls) assert.match(call, /^nsExec::Exec `"\$SYSDIR\\taskkill\.exe" /);
 });
