@@ -4,8 +4,10 @@
 ; "Replace" copies the original's profile (%APPDATA%\Altus: WhatsApp sessions,
 ; tabs, settings, themes) into the Altus + profile, renames the original
 ; folder to "Altus (backup YYYY-MM-DD)" (never deleted), uninstalls the
-; original program and removes its autostart entry. Nothing is touched unless
-; the person picks "Replace", or a silent install passes --replace-altus.
+; original program and removes its autostart entry. An install for all users
+; leaves a copy installed for the user only (see ALTUS_SHOULD_OFFER) and says
+; so. Nothing is touched unless the person picks "Replace", or a silent
+; install passes --replace-altus.
 ; Updates (--updated), reinstalls and PCs that already have an Altus +
 ; profile never see the page.
 ;
@@ -27,6 +29,7 @@ Var altusChoice          ; "" (not offered), "side" or "replace"
 Var altusUninstaller     ; original's uninstaller, if installed
 Var altusUninstallScope  ; /currentuser or /allusers
 Var altusInstallDir
+Var altusUserOnlyDir     ; installed for this user only, left installed (see below)
 Var altusRadioSide
 Var altusRadioReplace
 
@@ -51,11 +54,27 @@ Var altusRadioReplace
       ${If} $installMode == "all"
         SetShellVarContext all
       ${EndIf}
-      ; The original program, if still installed (its data can outlive it).
-      ReadRegStr $altusInstallDir HKCU "Software\${ORIGINAL_ALTUS_GUID}" InstallLocation
-      StrCpy $altusUninstallScope "/currentuser"
-      ${If} $altusInstallDir == ""
-        ReadRegStr $altusInstallDir HKLM "Software\${ORIGINAL_ALTUS_GUID}" InstallLocation
+      ; The original program, if still installed (its data can outlive it):
+      ; for this user (HKCU) or for all users (HKLM).
+      ReadRegStr $R8 HKCU "Software\${ORIGINAL_ALTUS_GUID}" InstallLocation
+      ReadRegStr $R7 HKLM "Software\${ORIGINAL_ALTUS_GUID}" InstallLocation
+      StrCpy $altusUserOnlyDir ""
+      ${If} $installMode == "all"
+        ; An install for all users runs with administrator rights: only HKLM,
+        ; which only an administrator can write, may name the uninstaller to
+        ; run. Any program the user runs can write HKCU, and would get its
+        ; own "Uninstall Altus.exe" run with those rights. A copy installed
+        ; for this user only is left for them to uninstall.
+        StrCpy $altusInstallDir $R7
+        StrCpy $altusUninstallScope "/allusers"
+        ${If} $R7 == ""
+          StrCpy $altusUserOnlyDir $R8
+        ${EndIf}
+      ${ElseIf} $R8 != ""
+        StrCpy $altusInstallDir $R8
+        StrCpy $altusUninstallScope "/currentuser"
+      ${Else}
+        StrCpy $altusInstallDir $R7
         StrCpy $altusUninstallScope "/allusers"
       ${EndIf}
       ${If} $altusInstallDir != ""
@@ -66,12 +85,15 @@ Var altusRadioReplace
   ${EndIf}
 !macroend
 
-; Closes the original Altus (current user's processes only).
+; Closes the original Altus (current user's processes only). taskkill from
+; System32 by its full path: run through cmd, it was looked up in the current
+; folder first.
 !macro ALTUS_CLOSE_ORIGINAL
-  nsExec::Exec `"$SYSDIR\cmd.exe" /c taskkill /im "${ORIGINAL_ALTUS_EXE}" /fi "USERNAME eq %USERNAME%"`
+  ReadEnvStr $R1 USERNAME
+  nsExec::Exec `"$SYSDIR\taskkill.exe" /im "${ORIGINAL_ALTUS_EXE}" /fi "USERNAME eq $R1"`
   Pop $R0
   Sleep 1500
-  nsExec::Exec `"$SYSDIR\cmd.exe" /c taskkill /f /im "${ORIGINAL_ALTUS_EXE}" /fi "USERNAME eq %USERNAME%"`
+  nsExec::Exec `"$SYSDIR\taskkill.exe" /f /im "${ORIGINAL_ALTUS_EXE}" /fi "USERNAME eq $R1"`
   Pop $R0
   ; Let Chromium release its files before copying.
   Sleep 1500
@@ -250,13 +272,28 @@ Function AltusReplaceOriginal
     DetailPrint "Original data kept in $R4"
   ${EndIf}
 
-  ; Its autostart entry would point at a removed program.
+  ; Its autostart entry would point at a removed program, or start one
+  ; whose data has moved to Altus +.
+  StrCpy $R9 $altusInstallDir
+  ${If} $R9 == ""
+    StrCpy $R9 $altusUserOnlyDir
+  ${EndIf}
   ReadRegStr $R0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Altus"
-  ${If} $altusInstallDir != ""
-    ${StrContains} $R1 "$altusInstallDir" "$R0"
+  ${If} $R9 != ""
+    ${StrContains} $R1 "$R9" "$R0"
     ${If} $R1 != ""
       DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Altus"
     ${EndIf}
+  ${EndIf}
+
+  ${If} $altusUserOnlyDir != ""
+    DetailPrint "Altus is installed for this user only; left installed."
+    ${If} $LANGUAGE == 1040
+      StrCpy $R5 "Altus era installato solo per il tuo utente e non è stato disinstallato: puoi farlo da Impostazioni → App. Account, schede e impostazioni sono già passati ad Altus +."
+    ${Else}
+      StrCpy $R5 "Altus was installed for your user only and was not uninstalled: you can do it in Settings → Apps. Accounts, tabs and settings have already moved to Altus +."
+    ${EndIf}
+    MessageBox MB_OK|MB_ICONINFORMATION "$R5" /SD IDOK
   ${EndIf}
 
   ${If} $altusUninstaller != ""

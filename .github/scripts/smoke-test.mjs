@@ -1,7 +1,7 @@
 // Smoke test of the packaged Windows app, run by CI after `yarn make`.
 //
 //   node .github/scripts/smoke-test.mjs              checks 1-6 (`yarn smoke`)
-//   node .github/scripts/smoke-test.mjs --installer  checks 1-9
+//   node .github/scripts/smoke-test.mjs --installer  checks 1-10
 //
 // 1. fuses baked into the executable; app.asar holds only the built app,
 //    with the main and preload bundles, the window page, and the tray icons
@@ -70,9 +70,14 @@
 //    leaves one entry in the installed programs list, the link
 //    registration and the autostart entry;
 // 9. uninstalling removes the program, its link registration and its
-//    autostart entry, and keeps the profile.
+//    autostart entry, and keeps the profile;
+// 10. an install for all users (with administrator rights) replacing an
+//    original Altus that HKCU says is installed for the user moves the data,
+//    closes the running Altus and removes its autostart entry, but runs no
+//    "Uninstall Altus.exe" from the folder HKCU names, which any program of
+//    the user could have pointed at its own.
 //
-// Checks 7-9 install Altus +, write %APPDATA% and uninstall, so they only run
+// Checks 7-10 install Altus +, write %APPDATA% and uninstall, so they only run
 // on a GitHub-hosted runner, which is discarded afterwards. The app is
 // observed through Chromium's DevTools protocol (--remote-debugging-port) and
 // stopped by PID. Failures leave logs and screenshots in smoke-artifacts/.
@@ -2033,6 +2038,77 @@ async function checkUninstall() {
   return { failures, notes: [] };
 }
 
+/** HKCU's key of the original Altus (electron-builder's GUID of its appId). */
+function originalAltusKey() {
+  const guid = read("makers/nsis/replaceAltus.nsh").match(/!define ORIGINAL_ALTUS_GUID "([^"]+)"/)[1];
+  const Winreg = createRequire(import.meta.url)(path.join(root, "node_modules", "winreg"));
+  return { Winreg, key: new Winreg({ hive: Winreg.HKCU, key: `\\Software\\${guid}` }) };
+}
+
+/**
+ * An install for all users runs with administrator rights, so it must not
+ * run an "Uninstall Altus.exe" from a folder HKCU names: any program the user
+ * runs can write HKCU. HKCU names a folder with a stand-in uninstaller (a
+ * copy of whoami) and a stand-in Altus, running (a copy of ping). The data
+ * still moves to Altus +, the running Altus is closed and its autostart
+ * entry removed; the stand-in uninstaller is neither run nor deleted (it
+ * used to be run, then deleted).
+ */
+async function checkAllUsersInstall() {
+  const failures = [];
+  const profile = path.join(APPDATA, PROFILE_FOLDER);
+  // A first install again: the Altus + profile of checks 7-9 set aside.
+  if (fs.existsSync(profile)) fs.renameSync(profile, `${profile} (checks 7-9)`);
+  const seeded = seedOriginalAltus(ORIGINAL_TABS);
+  const userInstall = fs.mkdtempSync(path.join(TEMP, "as-user-altus-"));
+  const system32 = path.join(process.env.SystemRoot, "System32");
+  const uninstaller = path.join(userInstall, "Uninstall Altus.exe");
+  fs.copyFileSync(path.join(system32, "whoami.exe"), uninstaller);
+  const originalExe = path.join(userInstall, "Altus.exe");
+  fs.copyFileSync(path.join(system32, "PING.EXE"), originalExe);
+  const { Winreg, key } = originalAltusKey();
+  await new Promise((resolve, reject) =>
+    key.set("InstallLocation", Winreg.REG_SZ, userInstall, (error) => (error ? reject(error) : resolve())));
+  await writeRunEntry("Altus", `"${originalExe}" --hidden`);
+  const running = launch(originalExe, ["-n", "600", "127.0.0.1"]);
+  const installDir = path.join(TEMP, "as-install-all");
+  try {
+    const result = spawnSync(findInstaller(), ["/S", "/allusers", "--replace-altus", `/D=${installDir}`], { timeout: 300_000 });
+    if (result.status !== 0) throw new Error(`the installer exited with ${result.status ?? result.error}`);
+    if (!fs.existsSync(uninstaller)) {
+      failures.push(`the install for all users ran the "Uninstall Altus.exe" of the folder HKCU names (it is gone)`);
+    }
+    const copied = path.join(profile, "tabs.json");
+    if (!fs.existsSync(copied) || !sameJson(readJson(copied), seeded["tabs.json"])) {
+      failures.push("the original's tabs did not move into the Altus + profile");
+    }
+    if (fs.existsSync(path.join(APPDATA, "Altus"))) failures.push("%APPDATA%\\Altus was not renamed");
+    await waitFor("the running Altus to be closed", 5_000, () => running.exited)
+      .catch(() => failures.push("the installer did not close the running Altus"));
+    const { value: entry } = await readRunEntry("Altus");
+    if (entry) failures.push(`the original's autostart entry was kept: ${entry}`);
+
+    const exe = fs.existsSync(installDir) ? findInstalledExe(installDir) : null;
+    if (!exe) {
+      failures.push(`no ${packageJson.productName}.exe under ${installDir}`);
+    } else {
+      const programDir = path.dirname(exe);
+      const own = fs.readdirSync(programDir).find((file) => /^Uninstall .*\.exe$/.test(file));
+      // Without _?= the uninstaller copies itself to %TEMP% and returns at once.
+      if (own) spawnSync(path.join(programDir, own), ["/allusers", "/S"], { timeout: 120_000 });
+      await waitFor("the program for all users to be removed", 120_000, () => !fs.existsSync(exe))
+        .catch((error) => failures.push(error.message));
+    }
+  } catch (error) {
+    failures.push(error.message);
+  } finally {
+    if (!running.exited) spawnSync("taskkill", ["/PID", String(running.child.pid), "/F"], { stdio: "ignore" });
+    await new Promise((resolve) => key.destroy(() => resolve()));
+    await removeRunEntry("Altus").catch(() => {});
+  }
+  return { failures, notes: [] };
+}
+
 function findInstaller() {
   const name = `Altus-Plus-Setup-${packageJson.version}.exe`;
   const found = fs.readdirSync(path.join(root, "out", "make"), { recursive: true })
@@ -2056,6 +2132,7 @@ if (runInstaller) {
     ["7. Installer replaces the original Altus; app opens its tabs and settings; autostart written only when needed and follows its setting at once; whatsapp:// links registered while on", checkInstallReplacingOriginal],
     ["8. Reinstall leaves the profile, the original data, the link registration and autostart alone", checkReinstall],
     ["9. Uninstall removes the program, its link registration and its autostart entry, keeps the profile", checkUninstall],
+    ["10. Install for all users runs no uninstaller HKCU names; data moved, running Altus closed, its autostart removed", checkAllUsersInstall],
   );
 }
 
@@ -2085,7 +2162,7 @@ for (const [name, check] of checks) {
   console.log(`${result.failures.length ? "FAIL" : "ok  "} ${name} (${seconds}s)`);
   for (const line of result.failures) console.log(`       - ${line}`);
   for (const line of result.notes) console.log(`       ${line}`);
-  // Checks 8 and 9 need the installed app.
+  // Checks 8-10 need the installed app (10, its uninstall in check 9).
   if (name.startsWith("7.") && !install.exe) blocked = true;
 }
 
