@@ -9,10 +9,6 @@ import { ElectronThemeStoreIpcApi } from "./stores/themes/common";
 import { ElectronSettingsStoreIpcApi } from "./stores/settings/common";
 import type { ElectronIPCHandlers } from "./ipcHandlersType";
 
-ipcRenderer.invoke("get-whatsapp-preload-path").then((preloadPath) => {
-  contextBridge.exposeInMainWorld("whatsappPreloadPath", preloadPath);
-});
-
 const electronTabStoreIpcApi: ElectronTabStoreIpcApi = {
   getStore: async () => await ipcRenderer.invoke("tab-store-get"),
   set: async (key, value) =>

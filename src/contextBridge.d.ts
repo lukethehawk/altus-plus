@@ -12,7 +12,6 @@ declare global {
     electronTabStore: ElectronTabStoreIpcApi;
     electronThemeStore: ElectronThemeStoreIpcApi;
     electronSettingsStore: ElectronSettingsStoreIpcApi;
-    whatsappPreloadPath: string;
     electronIPCHandlers: ElectronIPCHandlers;
     windowActions: {
       minimize: () => Promise<void>;
