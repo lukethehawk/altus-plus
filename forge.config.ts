@@ -2,16 +2,12 @@ import type { ForgeConfig } from "@electron-forge/shared-types";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
-import MakerAppImage from "./makers/MakerAppImage";
 import MakerNSIS from "./makers/MakerNSIS";
-import MakerDMG from "./makers/MakerDMG";
 import { COPYRIGHT } from "./makers/CommonConfig";
 
 const config: ForgeConfig = {
   packagerConfig: {
     icon: "./public/assets/icons/icon",
-    appBundleId: "com.lukethehawk.altusplus",
-    appCategoryType: "public.app-category.social-networking",
     // The exe's copyright line; without it, it keeps Electron's own.
     appCopyright: COPYRIGHT,
     // No whatsapp:// registration here: the app registers itself only while
@@ -26,7 +22,8 @@ const config: ForgeConfig = {
     extraResource: ["./app-update.yml"],
   },
   rebuildConfig: {},
-  makers: [new MakerAppImage(), new MakerDMG(), new MakerNSIS()],
+  // Altus + is built for Windows only: the NSIS installer.
+  makers: [new MakerNSIS()],
   plugins: [
     new VitePlugin({
       // `build` can specify multiple entry builds, which can be Main process, Preload scripts, Worker process, etc.
