@@ -81,6 +81,8 @@
 // on a GitHub-hosted runner, which is discarded afterwards. The app is
 // observed through Chromium's DevTools protocol (--remote-debugging-port) and
 // stopped by PID. Failures leave logs and screenshots in smoke-artifacts/.
+// A tab that does not reach WhatsApp Web in 90 s is reloaded once, and the
+// notes say what every page of the app was doing then.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
@@ -289,6 +291,49 @@ function saveArtifact(name, contents) {
   fs.writeFileSync(path.join(ARTIFACTS, name), contents);
 }
 
+/** Lines of the app's output that look like errors, each once. */
+const appErrorLines = (output) =>
+  [...new Set(output.split(/\r?\n/).filter((line) => /Failed to load|ERR_|FATAL|Error:/.test(line)))].map((line) => line.trim());
+
+/** What a page or worker says about itself, in any DevTools target. */
+const TARGET_STATE = `(() => {
+  const page = typeof document === "undefined" ? null : document;
+  return {
+    ready: page?.readyState, title: page?.title, tabId: page?.body?.dataset.tabId, visibility: page?.visibilityState,
+    serviceWorker: typeof navigator.serviceWorker === "undefined" ? undefined : Boolean(navigator.serviceWorker.controller),
+  };
+})()`;
+
+/**
+ * Every DevTools target of the app and what it says within 5 s, to show
+ * where a tab that does not load is stuck: still loading, not answering, or
+ * with no WhatsApp page at all.
+ */
+async function describeTargets(port) {
+  let list;
+  try {
+    list = await targets(port);
+  } catch (error) {
+    return [`no DevTools targets: ${error.message}`];
+  }
+  const lines = [];
+  for (const target of list) {
+    let state;
+    try {
+      const page = await Cdp.connect(target.webSocketDebuggerUrl);
+      try {
+        state = await Promise.race([page.evaluate(TARGET_STATE), sleep(5000).then(() => "no answer in 5s")]);
+      } finally {
+        page.close();
+      }
+    } catch (error) {
+      state = error.message;
+    }
+    lines.push(`${target.type} ${target.url.slice(0, 80)}: ${typeof state === "string" ? state : JSON.stringify(state)}`);
+  }
+  return lines;
+}
+
 const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -375,6 +420,9 @@ async function checkRunningApp(name, exe, args, expected, port) {
         await waitFor(`WhatsApp Web in tab ${id}`, 90_000, loaded);
       } catch {
         notes.push(`tab ${id}: WhatsApp Web did not load in 90s, reloaded it once`);
+        // Where it was stuck, noted even when the reload helps.
+        notes.push(...(await describeTargets(port)).map((line) => `tab ${id} at 90s: ${line}`));
+        notes.push(...appErrorLines(app.output).slice(0, 3).map((line) => `tab ${id} at 90s, app log: ${line}`));
         await cdp.evaluate(`document.getElementById(${JSON.stringify(`webview-${id}`)}).reload()`);
         try {
           await waitFor(`WhatsApp Web in tab ${id}`, 60_000, loaded);
@@ -404,8 +452,7 @@ async function checkRunningApp(name, exe, args, expected, port) {
     await stop(app).catch((error) => failures.push(error.message));
     if (failures.length) {
       saveArtifact(`${name}.log`, app.output);
-      const appErrors = [...new Set(app.output.split(/\r?\n/).filter((line) => /Failed to load|ERR_|FATAL|Error:/.test(line)))];
-      failures.push(...appErrors.slice(0, 3).map((line) => `app log: ${line.trim()}`));
+      failures.push(...appErrorLines(app.output).slice(0, 3).map((line) => `app log: ${line}`));
     }
   }
   return { failures, notes, output: app.output };

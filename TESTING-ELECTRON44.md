@@ -309,6 +309,12 @@ fails it uploads no installer.
     runs can write HKCU; the installer used to run that file with
     administrator rights. Altus + is then uninstalled again.
 
+A tab that does not reach WhatsApp Web within 90 s is reloaded once. The
+run's notes then list what every page and worker of the app was doing
+(still loading, not answering, or no WhatsApp page at all) and the app's
+error lines, also when the reload helps. This has happened twice, only
+locally (Electron 44.11.1 and 44.11.3), and could not be reproduced since.
+
 Failures attach logs and screenshots (`smoke-artifacts`) to the run. Checks
 7-10 install and uninstall for real, so they only run on GitHub's throwaway
 runners. Locally, `yarn package -p win32` then `yarn smoke` runs checks 1-6
