@@ -2,9 +2,6 @@ name: Stability checks
 
 on:
   pull_request:
-  push:
-    branches:
-      - hardening/stability-security-first
 
 permissions:
   contents: read
@@ -12,6 +9,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,6 +31,9 @@ jobs:
 
   windows-package:
     runs-on: windows-latest
+    # The longest Windows job so far took 9 minutes. A hung step fails here
+    # instead of holding the runner for GitHub's 6-hour default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

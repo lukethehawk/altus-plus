@@ -101,7 +101,7 @@ Not done yet: the installer is not code-signed, and session cookies are stored t
 
 ## Build from source
 
-Requires Node.js 22 or later and Corepack (Yarn 4).
+Requires Node.js 22 or later and Corepack, which downloads the Yarn version pinned in `package.json` (Yarn 4) and refuses it if its hash does not match.
 
 ```bash
 corepack enable
