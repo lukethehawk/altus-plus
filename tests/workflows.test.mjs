@@ -49,3 +49,9 @@ test("the checks master requires still run on every pull request", () => {
   assert.match(text, /^on:\n {2}pull_request:\n/m);
   assert.deepEqual(jobsOf(text).map((job) => job.name), ["validate", "windows-package"]);
 });
+
+test("Corepack checks the Yarn it downloads", () => {
+  // The hash is of Yarn's yarn.js, the same file on npm and repo.yarnpkg.com.
+  const { packageManager } = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+  assert.match(packageManager, /^yarn@\d+\.\d+\.\d+\+sha512\.[0-9a-f]{128}$/);
+});

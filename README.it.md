@@ -101,7 +101,7 @@ Non ancora fatto: l'installer non è firmato digitalmente e i cookie di sessione
 
 ## Compilare dai sorgenti
 
-Servono Node.js 22 o successivo e Corepack (Yarn 4).
+Servono Node.js 22 o successivo e Corepack, che scarica la versione di Yarn fissata in `package.json` (Yarn 4) e la rifiuta se l'hash non corrisponde.
 
 ```bash
 corepack enable
