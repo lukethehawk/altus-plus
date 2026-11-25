@@ -175,7 +175,7 @@ const CustomTitlebar: Component<{
           </For>
         </Menubar.Menubar>
       </Show>
-      <div class="flex-grow flex items-center justify-center pl-4">Altus</div>
+      <div class="flex-grow flex items-center justify-center pl-4">Altus +</div>
       <div class="grid grid-cols-[repeat(3,46px)] h-full [-webkit-app-region:no-drag] ml-auto">
         <button
           onClick={window.windowActions.minimize}
