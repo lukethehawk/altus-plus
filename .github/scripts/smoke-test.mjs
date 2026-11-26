@@ -1572,6 +1572,30 @@ async function checkWindowListeners(cdp, notes) {
 }
 
 /**
+ * An item of the custom title bar's menu reaches the window even when no
+ * window has the focus, here because it is minimized. Before, only Help →
+ * Resource Usage and Run Resource Test did; the others did nothing.
+ */
+async function checkMenuWithoutFocus(cdp) {
+  const settingsOpen = () => cdp.evaluate('!!document.querySelector("[data-settings-dialog]")');
+  try {
+    if (await settingsOpen()) return ["menu without focus: Settings was open before the click"];
+    await cdp.evaluate("window.windowActions.minimize()");
+    await waitFor("the minimized window to lose the focus", 5_000, () => cdp.evaluate("window.windowActions.isBlurred()"));
+    await cdp.evaluate('window.clickMenuItem("open-settings")');
+    const opened = await waitFor("Settings to open", 5_000, settingsOpen).then(() => true, () => false);
+    await cdp.evaluate("window.windowActions.restore()");
+    if (!opened) return ["menu without focus: Settings → Settings did nothing while the window was minimized"];
+    // Its close button comes first, next to the title.
+    await cdp.evaluate('document.querySelector("[data-settings-dialog] button").click()');
+    await waitFor("Settings to close", 5_000, async () => !(await settingsOpen()));
+    return [];
+  } catch (error) {
+    return [`menu without focus: ${error.message}`];
+  }
+}
+
+/**
  * An attachment downloaded during the resource test goes through electron-dl
  * like any other: into the folder from Settings, with "Attachment saved".
  * The test's first sample creates the tabs' sessions, which used to happen
@@ -1624,6 +1648,7 @@ async function checkResourceTest() {
     cdp = await attachWhen(port, "Help → Run Resource Test", 90_000, async (page) => (await menuIds(page)).includes("resource-test"));
     failures.push(...(await checkTitlebarKept(cdp)));
     failures.push(...(await checkWindowListeners(cdp, notes)));
+    failures.push(...(await checkMenuWithoutFocus(cdp)));
     // Unread counts in flight while the app closes, as when the accounts sync
     // right after a start: every tab changes its title nonstop. A count that
     // reached the destroyed window stopped the restart with an error box.
@@ -2172,7 +2197,7 @@ const checks = [
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors, redirect off WhatsApp cancelled; started by a whatsapp:// link, on screen though remembered off it", checkFreshProfile],
   ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account; unreadable saved files are set aside and the accounts come back", checkStartInTray],
   ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, counts and clicks tied to their tab, invalid tab and theme lists refused, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
-  ["6. Resource test: title bar kept until restart, window listeners, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
+  ["6. Resource test: title bar kept until restart, window listeners, menu without focus, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
 ];
 if (runInstaller) {
   checks.push(

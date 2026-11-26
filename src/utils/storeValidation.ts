@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TAB_ID } from "./partitions";
 import type { Tab } from "../stores/tabs/common";
+import { SettingsSchema, type SettingKey } from "../stores/settings/common";
 
 /**
  * What the window may save in tabs.json and themes.json ("tab-store-set" and
@@ -64,6 +65,16 @@ const ThemeListSchema = z.array(ThemeSchema);
 
 export function isValidThemeStoreValue(key: unknown, value: unknown): boolean {
   return key === "themes" && ThemeListSchema.safeParse(value).success;
+}
+
+/**
+ * A setting the window saves ("settings-store-set"): a key of the settings
+ * schema, not one every object inherits ("__proto__", "toString"), and a
+ * value that key accepts. No value (undefined) deletes the setting.
+ */
+export function isValidSettingUpdate(key: unknown, value: unknown): key is SettingKey {
+  if (typeof key !== "string" || !Object.prototype.hasOwnProperty.call(SettingsSchema.shape, key)) return false;
+  return value === undefined || SettingsSchema.shape[key as SettingKey].safeParse({ value }).success;
 }
 
 /**

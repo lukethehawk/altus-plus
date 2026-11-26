@@ -21,7 +21,12 @@ import { electronTabStore } from "./stores/tabs/electron";
 import { Tab, TabStore } from "./stores/tabs/common";
 import { electronThemeStore } from "./stores/themes/electron";
 import { ThemeStore } from "./stores/themes/common";
-import { isValidTabStoreValue, isValidThemeStoreValue, usableTabs } from "./utils/storeValidation";
+import {
+  isValidSettingUpdate,
+  isValidTabStoreValue,
+  isValidThemeStoreValue,
+  usableTabs,
+} from "./utils/storeValidation";
 import { electronSettingsStore } from "./stores/settings/electron";
 import { openStore, setAsideStores } from "./stores/openStore";
 import { positionOnScreen } from "./utils/windowPosition";
@@ -88,7 +93,15 @@ import {
   scheduleUpdateChecks,
   setupAutoUpdater,
 } from "./updater";
-import { isAltusPartition, isTrustedWhatsAppURL, getSafeExternalHttpURL } from "./utils/security";
+import {
+  getSafeExternalHttpURL,
+  isAllowedWebview,
+  isTrustedWhatsAppURL,
+  isWhatsAppPage,
+  lockDownWebview,
+  onlyFromSender,
+} from "./utils/security";
+import { nextZoomFactor, reportedUnreadCount } from "./utils/pageMessages";
 import { TabSessions } from "./utils/tabSessions";
 import { allowPermissionCheck, allowPermissionRequest } from "./utils/permissions";
 import { isFullFolderPath } from "./utils/downloads";
@@ -98,7 +111,6 @@ import {
   findWhatsAppLink,
   whatsAppWebAddress,
 } from "./utils/whatsappLinks";
-import { SettingsSchema } from "./stores/settings/common";
 
 const windowState = openStore<{
   width: number | null;
@@ -136,6 +148,26 @@ const unreadByTab = new Map<string, number>();
 
 /** The saved tabs: a list, and only tabs whose ID can name a partition. */
 const savedTabs = () => usableTabs(electronTabStore.get("tabs"));
+
+/** The app's window: the only one it opens (message boxes are not windows). */
+const appWindow = (): BrowserWindow | undefined => BrowserWindow.getAllWindows()[0];
+
+/** Brings a window to the front, restoring it if it was minimized. */
+function showWindow(window: BrowserWindow) {
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+/**
+ * A menu item that asks the app window to act: open a dialog, switch tabs…
+ * Sent to the focused window, else to the app window: the custom title bar's
+ * menu is part of the app window, which may not have the focus.
+ */
+const sendToWindow = (channel: string) => () => {
+  const window = BrowserWindow.getFocusedWindow() ?? appWindow();
+  window?.webContents.send(channel);
+};
 
 /** Hovering the tray icon shows the unread chats of every account. */
 function updateTrayTooltip(tabs?: Tab[]) {
@@ -483,8 +515,7 @@ function exitApp() {
 }
 
 function createWindow() {
-  const useCustomTitlebar =
-    process.platform !== "darwin" && getSettingWithDefault("customTitlebar");
+  const useCustomTitlebar = getSettingWithDefault("customTitlebar");
   const rememberWindowSize = getSettingWithDefault("rememberWindowSize");
   const rememberWindowPosition = getSettingWithDefault(
     "rememberWindowPosition"
@@ -529,18 +560,11 @@ function createWindow() {
   mainWindow.webContents.on(
     "will-attach-webview",
     (event, webPreferences, params) => {
-      if (
-        !isTrustedWhatsAppURL(params.src) ||
-        !isAltusPartition(params.partition)
-      ) {
+      if (!isAllowedWebview(params.src, params.partition)) {
         event.preventDefault();
         return;
       }
-      webPreferences.preload = path.join(__dirname, "whatsapp.preload.cjs");
-      webPreferences.nodeIntegration = false;
-      webPreferences.nodeIntegrationInSubFrames = false;
-      webPreferences.contextIsolation = true;
-      webPreferences.sandbox = true;
+      lockDownWebview(webPreferences, path.join(__dirname, "whatsapp.preload.cjs"));
       // Before the page loads, not once it has (the window used to ask).
       setUpTabPermissions(params.partition);
     }
@@ -625,13 +649,9 @@ if (!singleInstanceLock) {
   app.exit();
 } else {
   app.on("second-instance", (_, argv) => {
-    if (BrowserWindow.getAllWindows().length === 0) return;
-
-    const mainWindow = BrowserWindow.getAllWindows()[0];
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-
+    const mainWindow = appWindow();
+    if (!mainWindow) return;
+    showWindow(mainWindow);
     handleWhatsappLinks(argv);
   });
 
@@ -728,17 +748,7 @@ if (!singleInstanceLock) {
   // Closing the last window or an update quits without exitApp().
   app.on("will-quit", () => resourceTest?.finish());
 
-  app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-      app.quit();
-    }
-  });
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
+  app.on("window-all-closed", () => app.quit());
 
   app.on("web-contents-created", (_, webContents) => {
     if (webContents.getType() === "webview") {
@@ -777,36 +787,21 @@ if (!singleInstanceLock) {
         showSaveImageAs: true,
         showInspectElement: true,
         labels: localizedContextMenuLabels,
-        append: (def, params, window) => [
-          {
-            label: electronI18N.t("Bold"),
+        append: (def, params, window) => {
+          // WhatsApp's formatting marks, around the selection in the text
+          // being written (src/whatsapp.preload.ts).
+          const format = (label: string, mark: string) => ({
+            label,
             visible: params.isEditable,
-            click: () => {
-              (window as BrowserWindow).webContents.send("format-text", "*");
-            },
-          },
-          {
-            label: electronI18N.t("Italic"),
-            visible: params.isEditable,
-            click: () => {
-              (window as BrowserWindow).webContents.send("format-text", "_");
-            },
-          },
-          {
-            label: electronI18N.t("Strike"),
-            visible: params.isEditable,
-            click: () => {
-              (window as BrowserWindow).webContents.send("format-text", "~");
-            },
-          },
-          {
-            label: electronI18N.t("Monospaced"),
-            visible: params.isEditable,
-            click: () => {
-              (window as BrowserWindow).webContents.send("format-text", "```");
-            },
-          },
-        ],
+            click: () => (window as BrowserWindow).webContents.send("format-text", mark),
+          });
+          return [
+            format(electronI18N.t("Bold"), "*"),
+            format(electronI18N.t("Italic"), "_"),
+            format(electronI18N.t("Strike"), "~"),
+            format(electronI18N.t("Monospaced"), "```"),
+          ];
+        },
       });
     }
 
@@ -851,7 +846,7 @@ function handleWhatsappLinks(argv: string[]) {
     console.warn("Ignored a whatsapp:// link that is not a chat or a group invite");
     return;
   }
-  const mainWindow = BrowserWindow.getAllWindows()[0];
+  const mainWindow = appWindow();
   if (windowTakesWhatsAppLinks && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("open-whatsapp-link", address);
   } else {
@@ -971,17 +966,7 @@ function toggleTray(mainWindow: BrowserWindow, enabled: boolean) {
   if (tray) tray.destroy();
   tray = undefined;
   if (!enabled) return;
-  if (process.platform === "darwin") {
-    app.dock?.setMenu(getLocalizedTrayMenu());
-  }
-  tray = new Tray(
-    process.platform === "darwin"
-      ? trayIcon.resize({
-          width: 16,
-          height: 16,
-        })
-      : trayIcon
-  );
+  tray = new Tray(trayIcon);
   trayTooltip = "";
   // A new icon starts without the badge.
   updateUnreadIndicators(mainWindow);
@@ -989,12 +974,10 @@ function toggleTray(mainWindow: BrowserWindow, enabled: boolean) {
   tray.on("mouse-enter", () => updateTrayTooltip());
   tray.setContextMenu(getLocalizedTrayMenu());
   tray.on("click", () => {
-    if (process.platform !== "darwin") {
-      if (mainWindow.isVisible()) {
-        mainWindow.hide();
-      } else {
-        mainWindow.show();
-      }
+    if (mainWindow.isVisible()) {
+      mainWindow.hide();
+    } else {
+      mainWindow.show();
     }
   });
 }
@@ -1028,19 +1011,14 @@ function setUpTabPermissions(partition: string) {
 }
 
 function addIPCHandlers(mainWindow: BrowserWindow) {
-  // Every invoke channel serves the app's own UI. WhatsApp pages only use the
-  // send channels below (zoom, open-link, message-count), which check their
-  // sender themselves.
+  // Every invoke channel serves the app's own UI, and only the app window may
+  // call it. WhatsApp pages only use the send channels below (open-link,
+  // notification-clicked, zoom, message-count), which check that the sender
+  // is a WhatsApp tab.
   const handle = (
     channel: string,
     listener: Parameters<typeof ipcMain.handle>[1]
-  ) =>
-    ipcMain.handle(channel, (event, ...args) => {
-      if (event.sender !== mainWindow.webContents) {
-        throw new Error(`Unauthorized IPC sender for ${channel}`);
-      }
-      return listener(event, ...args);
-    });
+  ) => ipcMain.handle(channel, onlyFromSender(mainWindow.webContents, channel, listener));
 
   // The window asks which account opens a whatsapp:// link from now on; one
   // that arrived earlier (the link the app was started with) is handed over.
@@ -1062,14 +1040,9 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
 
   handle(
     "settings-store-set",
-    (event, key: SettingKey, value: unknown) => {
-      if (event.sender !== mainWindow.webContents) throw new Error("Unauthorized settings sender");
-      if (typeof key !== "string" || !Object.prototype.hasOwnProperty.call(SettingsSchema.shape, key)) {
-        throw new Error("Invalid setting key");
-      }
+    (_event, key: unknown, value: unknown) => {
+      if (!isValidSettingUpdate(key, value)) throw new Error("Invalid setting update");
       if (value === undefined) return electronSettingsStore.delete(key);
-      const parsed = SettingsSchema.shape[key].safeParse({ value });
-      if (!parsed.success) throw new Error("Invalid setting value");
       if (key === "autoHideMenuBar") {
         changeAutoHideMenuBar(mainWindow, value as boolean);
       } else if (key === "trayIcon") {
@@ -1104,11 +1077,10 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
 
   handle(
     "tab-store-set",
-    (event, key: keyof TabStore, value: unknown) => {
-      if (event.sender !== mainWindow.webContents) throw new Error("Unauthorized tab sender");
-      if (!["tabs", "selectedTabId", "previouslyClosedTab"].includes(key)) throw new Error("Invalid tab store key");
-      // Nothing of a refused value is saved: no tab list, no closed tab.
-      if (!isValidTabStoreValue(key, value)) throw new Error("Invalid tab store value");
+    (_event, key: keyof TabStore, value: unknown) => {
+      // A known key with a valid value. Nothing of a refused update is
+      // saved: no tab list, no closed tab.
+      if (!isValidTabStoreValue(key, value)) throw new Error("Invalid tab store update");
       if (key === "tabs" && value !== undefined) recordClosedTab(value);
       if (value === undefined) electronTabStore.delete(key);
       else electronTabStore.set(key, value);
@@ -1132,17 +1104,17 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
 
   handle(
     "theme-store-set",
-    (event, key: keyof ThemeStore, value: unknown) => {
-      if (event.sender !== mainWindow.webContents || key !== "themes") throw new Error("Unauthorized theme store update");
-      // A list, of themes with an ID; never deleted (which reset it to the built-in themes).
-      if (!isValidThemeStoreValue(key, value)) throw new Error("Invalid theme store value");
+    (_event, key: keyof ThemeStore, value: unknown) => {
+      // The "themes" key, with a list of themes with an ID; never deleted
+      // (which reset it to the built-in themes).
+      if (!isValidThemeStoreValue(key, value)) throw new Error("Invalid theme store update");
       return electronThemeStore.set(key, value);
     }
   );
 
 
   ipcMain.on("open-link", (event, rawURL: unknown) => {
-    if (event.sender.getType() !== "webview" || !isTrustedWhatsAppURL(event.sender.getURL())) return;
+    if (!isWhatsAppPage(event.sender)) return;
     const url = getSafeExternalHttpURL(rawURL);
     if (!url) return;
     void shell.openExternal(url).catch((error) => console.error("Failed to open external URL:", error));
@@ -1214,53 +1186,38 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
   // account's tab. WhatsApp's own click handler then opens the chat.
   ipcMain.on("notification-clicked", (event) => {
     const { sender } = event;
-    if (sender.getType() !== "webview" || !isTrustedWhatsAppURL(sender.getURL())) return;
+    if (!isWhatsAppPage(sender)) return;
     // The tab of the page's own session, never one the page names.
     const tabId = tabSessions.tabOf(sender.session);
     if (tabId === undefined || !savedTabs().some((tab) => tab.id === tabId)) return;
     if (mainWindow.isDestroyed()) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    showWindow(mainWindow);
     mainWindow.webContents.send("select-tab", tabId);
   });
 
-  ipcMain.on("zoom", ({ sender }, type) => {
-    if (sender.getType() !== "webview" || !isTrustedWhatsAppURL(sender.getURL())) return;
-    if (!["in", "out", "reset"].includes(type)) return;
-    const currentZoomFactor = sender.getZoomFactor();
-    switch (type) {
-      case "in":
-        sender.setZoomFactor(Math.min(2.5, currentZoomFactor + 0.1));
-        break;
-      case "out":
-        sender.setZoomFactor(Math.max(0.5, currentZoomFactor - 0.1));
-        break;
-      default:
-        sender.setZoomFactor(1);
-        break;
-    }
+  ipcMain.on("zoom", ({ sender }, change: unknown) => {
+    if (!isWhatsAppPage(sender)) return;
+    const zoomFactor = nextZoomFactor(sender.getZoomFactor(), change);
+    if (zoomFactor !== undefined) sender.setZoomFactor(zoomFactor);
   });
 
   ipcMain.on("message-count", (event, detail: unknown) => {
     // Quitting or restarting destroys the window first; counts the tabs sent
     // meanwhile still arrive (often right after a start, while they sync).
     if (mainWindow.isDestroyed()) return;
-    if (event.sender.getType() !== "webview" || !isTrustedWhatsAppURL(event.sender.getURL())) return;
-    if (!detail || typeof detail !== "object") return;
+    if (!isWhatsAppPage(event.sender)) return;
+    const messageCount = reportedUnreadCount(detail);
     // The count is the page's own tab's: a page can rewrite the tab ID the
     // window gave it, not the session it runs in.
     const tabId = tabSessions.tabOf(event.sender.session);
-    const { messageCount } = detail as { messageCount?: unknown };
-    if (tabId === undefined || !Number.isSafeInteger(messageCount) ||
-        (messageCount as number) < 0 || (messageCount as number) > 100000) return;
+    if (tabId === undefined || messageCount === undefined) return;
     const tabs = savedTabs();
     const activeIds = new Set(tabs.map((tab) => tab.id));
     if (!activeIds.has(tabId)) return;
     for (const id of unreadByTab.keys()) {
       if (!activeIds.has(id)) unreadByTab.delete(id);
     }
-    unreadByTab.set(tabId, messageCount as number);
+    unreadByTab.set(tabId, messageCount);
     resourceTest?.accountLoaded(tabId, tabs.find((tab) => tab.id === tabId)?.name ?? "");
     mainWindow.webContents.send("message-count", { tabId, messageCount });
     updateUnreadIndicators(mainWindow, tabs);
@@ -1282,10 +1239,6 @@ function updateUnreadIndicators(mainWindow: BrowserWindow, tabs: Tab[] = savedTa
   }
   updateTrayTooltip(tabs);
   const lit = getSettingWithDefault("notificationBadge") && totalUnread(unreadByTab, tabIds) > 0;
-  if (process.platform === "darwin") {
-    app.dock?.setBadge(lit ? "·" : "");
-    return;
-  }
   if (tray && !tray.isDestroyed()) tray.setImage(lit ? trayNotificationIcon : trayIcon);
   mainWindow.setOverlayIcon(lit ? mainNotificationIcon : null, lit ? "Notification badge" : "Notification badge empty");
 }
@@ -1330,9 +1283,6 @@ async function initializeI18N(mainWindow: BrowserWindow) {
       tray.setContextMenu(getLocalizedTrayMenu());
       updateTrayTooltip();
     }
-    if (process.platform === "darwin" && tray) {
-      app.dock?.setMenu(getLocalizedTrayMenu());
-    }
     if (mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("reload-custom-title-bar");
     mainWindow.webContents.send("reload-translations");
@@ -1376,10 +1326,7 @@ function getLocalizedMainMenu() {
       submenu: [
         {
           label: electronI18N.t("Start &New Chat"),
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("new-chat");
-          },
+          click: sendToWindow("new-chat"),
           id: "start-new-chat",
         },
         {
@@ -1391,7 +1338,6 @@ function getLocalizedMainMenu() {
           label: electronI18N.t("&Quit"),
           id: "quit",
           accelerator: "CmdOrCtrl+Q",
-          acceleratorWorksWhenHidden: false,
           click: quitApp,
         },
       ],
@@ -1457,46 +1403,31 @@ function getLocalizedMainMenu() {
         {
           label: electronI18N.t("Add New Tab"),
           accelerator: "CmdOrCtrl+T",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("add-new-tab");
-          },
+          click: sendToWindow("add-new-tab"),
           id: "add-new-tab",
         },
         {
           label: electronI18N.t("Edit Active Tab"),
           accelerator: "CmdOrCtrl+E",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("edit-active-tab");
-          },
+          click: sendToWindow("edit-active-tab"),
           id: "edit-active-tab",
         },
         {
           label: electronI18N.t("Close Active Tab"),
           accelerator: "CmdOrCtrl+W",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("close-active-tab");
-          },
+          click: sendToWindow("close-active-tab"),
           id: "close-active-tab",
         },
         {
           label: electronI18N.t("Open Tab DevTools"),
           accelerator: "CmdOrCtrl+Shift+D",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("open-tab-devtools");
-          },
+          click: sendToWindow("open-tab-devtools"),
           id: "open-tab-devtools",
         },
         {
           label: electronI18N.t("Restore Tab"),
           accelerator: "CmdOrCtrl+Shift+T",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("restore-tab");
-          },
+          click: sendToWindow("restore-tab"),
           id: "restore-tab",
         },
         {
@@ -1505,19 +1436,13 @@ function getLocalizedMainMenu() {
         {
           label: electronI18N.t("Go to Next Tab"),
           accelerator: "CmdOrCtrl+Tab",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("next-tab");
-          },
+          click: sendToWindow("next-tab"),
           id: "next-tab",
         },
         {
           label: electronI18N.t("Go to Previous Tab"),
           accelerator: "CmdOrCtrl+Shift+Tab",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("previous-tab");
-          },
+          click: sendToWindow("previous-tab"),
           id: "previous-tab",
         },
         {
@@ -1526,19 +1451,13 @@ function getLocalizedMainMenu() {
         {
           label: electronI18N.t("Go to First Tab"),
           accelerator: "CmdOrCtrl+1",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("first-tab");
-          },
+          click: sendToWindow("first-tab"),
           id: "first-tab",
         },
         {
           label: electronI18N.t("Go to Last Tab"),
           accelerator: "CmdOrCtrl+9",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("last-tab");
-          },
+          click: sendToWindow("last-tab"),
           id: "last-tab",
         },
         {
@@ -1561,10 +1480,7 @@ function getLocalizedMainMenu() {
         {
           label: electronI18N.t("Theme Manager"),
           accelerator: "Alt+T",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("open-theme-manager");
-          },
+          click: sendToWindow("open-theme-manager"),
           id: "open-theme-manager",
         },
       ],
@@ -1575,10 +1491,7 @@ function getLocalizedMainMenu() {
         {
           label: electronI18N.t("&Settings"),
           accelerator: "Ctrl+,",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("open-settings");
-          },
+          click: sendToWindow("open-settings"),
           id: "open-settings",
         },
       ],
@@ -1634,10 +1547,7 @@ ${aboutDialogText}`,
         },
         {
           label: electronI18N.t("Resource Usage"),
-          click() {
-            const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-            if (window) window.webContents.send("open-resource-usage");
-          },
+          click: sendToWindow("open-resource-usage"),
           id: "resource-usage",
         },
         resourceTestMode
@@ -1648,10 +1558,7 @@ ${aboutDialogText}`,
             }
           : {
               label: electronI18N.t("Run Resource Test…"),
-              click() {
-                const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-                if (window) window.webContents.send("open-resource-test");
-              },
+              click: sendToWindow("open-resource-test"),
               id: "resource-test",
             },
         {
@@ -1706,17 +1613,11 @@ function getLocalizedTrayMenu() {
   )[] = [
     {
       label: electronI18N.t("Maximize"),
-      click() {
-        const window = BrowserWindow.getAllWindows()[0];
-        if (window) window.show();
-      },
+      click: () => appWindow()?.show(),
     },
     {
       label: electronI18N.t("Minimize to Tray"),
-      click() {
-        const window = BrowserWindow.getAllWindows()[0];
-        if (window) window.hide();
-      },
+      click: () => appWindow()?.hide(),
     },
     {
       label: electronI18N.t("Quit"),

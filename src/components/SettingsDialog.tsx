@@ -24,6 +24,7 @@ const SettingsDialog: Component<{
         <Dialog.Overlay class="fixed inset-0 z-50 bg-black/30" />
         <div class="fixed inset-0 z-50 flex items-center justify-center">
           <Dialog.Content
+            data-settings-dialog
             class="flex flex-col z-50 bg-zinc-800 text-white border rounded border-zinc-600 min-w-[30rem] px-3.5 pt-3 pb-2 max-w-[min(calc(100vw_-_1rem),32rem)] max-h-[70vh] overflow-hidden"
             onPointerDownOutside={(event) => {
               if (
