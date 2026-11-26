@@ -515,8 +515,7 @@ function exitApp() {
 }
 
 function createWindow() {
-  const useCustomTitlebar =
-    process.platform !== "darwin" && getSettingWithDefault("customTitlebar");
+  const useCustomTitlebar = getSettingWithDefault("customTitlebar");
   const rememberWindowSize = getSettingWithDefault("rememberWindowSize");
   const rememberWindowPosition = getSettingWithDefault(
     "rememberWindowPosition"
@@ -749,17 +748,7 @@ if (!singleInstanceLock) {
   // Closing the last window or an update quits without exitApp().
   app.on("will-quit", () => resourceTest?.finish());
 
-  app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-      app.quit();
-    }
-  });
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
+  app.on("window-all-closed", () => app.quit());
 
   app.on("web-contents-created", (_, webContents) => {
     if (webContents.getType() === "webview") {
@@ -977,17 +966,7 @@ function toggleTray(mainWindow: BrowserWindow, enabled: boolean) {
   if (tray) tray.destroy();
   tray = undefined;
   if (!enabled) return;
-  if (process.platform === "darwin") {
-    app.dock?.setMenu(getLocalizedTrayMenu());
-  }
-  tray = new Tray(
-    process.platform === "darwin"
-      ? trayIcon.resize({
-          width: 16,
-          height: 16,
-        })
-      : trayIcon
-  );
+  tray = new Tray(trayIcon);
   trayTooltip = "";
   // A new icon starts without the badge.
   updateUnreadIndicators(mainWindow);
@@ -995,12 +974,10 @@ function toggleTray(mainWindow: BrowserWindow, enabled: boolean) {
   tray.on("mouse-enter", () => updateTrayTooltip());
   tray.setContextMenu(getLocalizedTrayMenu());
   tray.on("click", () => {
-    if (process.platform !== "darwin") {
-      if (mainWindow.isVisible()) {
-        mainWindow.hide();
-      } else {
-        mainWindow.show();
-      }
+    if (mainWindow.isVisible()) {
+      mainWindow.hide();
+    } else {
+      mainWindow.show();
     }
   });
 }
@@ -1262,10 +1239,6 @@ function updateUnreadIndicators(mainWindow: BrowserWindow, tabs: Tab[] = savedTa
   }
   updateTrayTooltip(tabs);
   const lit = getSettingWithDefault("notificationBadge") && totalUnread(unreadByTab, tabIds) > 0;
-  if (process.platform === "darwin") {
-    app.dock?.setBadge(lit ? "·" : "");
-    return;
-  }
   if (tray && !tray.isDestroyed()) tray.setImage(lit ? trayNotificationIcon : trayIcon);
   mainWindow.setOverlayIcon(lit ? mainNotificationIcon : null, lit ? "Notification badge" : "Notification badge empty");
 }
@@ -1309,9 +1282,6 @@ async function initializeI18N(mainWindow: BrowserWindow) {
     if (tray && !tray.isDestroyed()) {
       tray.setContextMenu(getLocalizedTrayMenu());
       updateTrayTooltip();
-    }
-    if (process.platform === "darwin" && tray) {
-      app.dock?.setMenu(getLocalizedTrayMenu());
     }
     if (mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("reload-custom-title-bar");
@@ -1368,7 +1338,6 @@ function getLocalizedMainMenu() {
           label: electronI18N.t("&Quit"),
           id: "quit",
           accelerator: "CmdOrCtrl+Q",
-          acceleratorWorksWhenHidden: false,
           click: quitApp,
         },
       ],
