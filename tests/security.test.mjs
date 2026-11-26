@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getSafeExternalHttpURL, isTrustedWhatsAppURL, isAltusPartition } from "../src/utils/security.ts";
+import {
+  getSafeExternalHttpURL,
+  isAltusPartition,
+  isTrustedWhatsAppURL,
+  isWhatsAppPage,
+  onlyFromSender,
+} from "../src/utils/security.ts";
 
 test("IPC external URL validation", () => {
   assert.equal(getSafeExternalHttpURL("https://example.org/path?a=b"), "https://example.org/path?a=b");
@@ -25,4 +31,33 @@ test("persistent partition IDs", () => {
   for (const value of ["persist:../../secret", "persist:", "temporary", "persist:abc/def", 42, undefined]) {
     assert.equal(isAltusPartition(value), false, String(value));
   }
+});
+
+test("messages from WhatsApp tabs", () => {
+  const sender = (type, url) => ({ getType: () => type, getURL: () => url });
+  assert.equal(isWhatsAppPage(sender("webview", "https://web.whatsapp.com/")), true);
+  for (const [type, url] of [
+    ["window", "https://web.whatsapp.com/"], // the app window, even showing WhatsApp
+    ["webview", "https://example.org/"], // a tab that left WhatsApp
+    ["webview", "http://web.whatsapp.com/"],
+    ["webview", "about:blank"],
+    ["webview", ""],
+  ]) {
+    assert.equal(isWhatsAppPage(sender(type, url)), false, `${type} ${url}`);
+  }
+});
+
+test("invoke handlers answer only the app window", () => {
+  const appWindow = { id: 1 };
+  const calls = [];
+  const handler = onlyFromSender(appWindow, "smoke-channel", (event, ...args) => {
+    calls.push(args);
+    return "answer";
+  });
+  assert.equal(handler({ sender: appWindow }, "key", 42), "answer");
+  assert.deepEqual(calls, [["key", 42]]);
+  for (const sender of [{ id: 1 }, { id: 2 }, undefined, null]) {
+    assert.throws(() => handler({ sender }, "key", 42), /Unauthorized IPC sender for smoke-channel/);
+  }
+  assert.equal(calls.length, 1, "the listener ran for another sender");
 });

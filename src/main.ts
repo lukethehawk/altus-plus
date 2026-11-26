@@ -88,7 +88,13 @@ import {
   scheduleUpdateChecks,
   setupAutoUpdater,
 } from "./updater";
-import { isAltusPartition, isTrustedWhatsAppURL, getSafeExternalHttpURL } from "./utils/security";
+import {
+  getSafeExternalHttpURL,
+  isAltusPartition,
+  isTrustedWhatsAppURL,
+  isWhatsAppPage,
+  onlyFromSender,
+} from "./utils/security";
 import { TabSessions } from "./utils/tabSessions";
 import { allowPermissionCheck, allowPermissionRequest } from "./utils/permissions";
 import { isFullFolderPath } from "./utils/downloads";
@@ -1029,19 +1035,14 @@ function setUpTabPermissions(partition: string) {
 }
 
 function addIPCHandlers(mainWindow: BrowserWindow) {
-  // Every invoke channel serves the app's own UI. WhatsApp pages only use the
-  // send channels below (zoom, open-link, message-count), which check their
-  // sender themselves.
+  // Every invoke channel serves the app's own UI, and only the app window may
+  // call it. WhatsApp pages only use the send channels below (open-link,
+  // notification-clicked, zoom, message-count), which check that the sender
+  // is a WhatsApp tab.
   const handle = (
     channel: string,
     listener: Parameters<typeof ipcMain.handle>[1]
-  ) =>
-    ipcMain.handle(channel, (event, ...args) => {
-      if (event.sender !== mainWindow.webContents) {
-        throw new Error(`Unauthorized IPC sender for ${channel}`);
-      }
-      return listener(event, ...args);
-    });
+  ) => ipcMain.handle(channel, onlyFromSender(mainWindow.webContents, channel, listener));
 
   // The window asks which account opens a whatsapp:// link from now on; one
   // that arrived earlier (the link the app was started with) is handed over.
@@ -1063,8 +1064,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
 
   handle(
     "settings-store-set",
-    (event, key: SettingKey, value: unknown) => {
-      if (event.sender !== mainWindow.webContents) throw new Error("Unauthorized settings sender");
+    (_event, key: SettingKey, value: unknown) => {
       if (typeof key !== "string" || !Object.prototype.hasOwnProperty.call(SettingsSchema.shape, key)) {
         throw new Error("Invalid setting key");
       }
@@ -1105,11 +1105,10 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
 
   handle(
     "tab-store-set",
-    (event, key: keyof TabStore, value: unknown) => {
-      if (event.sender !== mainWindow.webContents) throw new Error("Unauthorized tab sender");
-      if (!["tabs", "selectedTabId", "previouslyClosedTab"].includes(key)) throw new Error("Invalid tab store key");
-      // Nothing of a refused value is saved: no tab list, no closed tab.
-      if (!isValidTabStoreValue(key, value)) throw new Error("Invalid tab store value");
+    (_event, key: keyof TabStore, value: unknown) => {
+      // A known key with a valid value. Nothing of a refused update is
+      // saved: no tab list, no closed tab.
+      if (!isValidTabStoreValue(key, value)) throw new Error("Invalid tab store update");
       if (key === "tabs" && value !== undefined) recordClosedTab(value);
       if (value === undefined) electronTabStore.delete(key);
       else electronTabStore.set(key, value);
@@ -1133,17 +1132,17 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
 
   handle(
     "theme-store-set",
-    (event, key: keyof ThemeStore, value: unknown) => {
-      if (event.sender !== mainWindow.webContents || key !== "themes") throw new Error("Unauthorized theme store update");
-      // A list, of themes with an ID; never deleted (which reset it to the built-in themes).
-      if (!isValidThemeStoreValue(key, value)) throw new Error("Invalid theme store value");
+    (_event, key: keyof ThemeStore, value: unknown) => {
+      // The "themes" key, with a list of themes with an ID; never deleted
+      // (which reset it to the built-in themes).
+      if (!isValidThemeStoreValue(key, value)) throw new Error("Invalid theme store update");
       return electronThemeStore.set(key, value);
     }
   );
 
 
   ipcMain.on("open-link", (event, rawURL: unknown) => {
-    if (event.sender.getType() !== "webview" || !isTrustedWhatsAppURL(event.sender.getURL())) return;
+    if (!isWhatsAppPage(event.sender)) return;
     const url = getSafeExternalHttpURL(rawURL);
     if (!url) return;
     void shell.openExternal(url).catch((error) => console.error("Failed to open external URL:", error));
@@ -1215,7 +1214,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
   // account's tab. WhatsApp's own click handler then opens the chat.
   ipcMain.on("notification-clicked", (event) => {
     const { sender } = event;
-    if (sender.getType() !== "webview" || !isTrustedWhatsAppURL(sender.getURL())) return;
+    if (!isWhatsAppPage(sender)) return;
     // The tab of the page's own session, never one the page names.
     const tabId = tabSessions.tabOf(sender.session);
     if (tabId === undefined || !savedTabs().some((tab) => tab.id === tabId)) return;
@@ -1225,7 +1224,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
   });
 
   ipcMain.on("zoom", ({ sender }, type) => {
-    if (sender.getType() !== "webview" || !isTrustedWhatsAppURL(sender.getURL())) return;
+    if (!isWhatsAppPage(sender)) return;
     if (!["in", "out", "reset"].includes(type)) return;
     const currentZoomFactor = sender.getZoomFactor();
     switch (type) {
@@ -1245,7 +1244,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     // Quitting or restarting destroys the window first; counts the tabs sent
     // meanwhile still arrive (often right after a start, while they sync).
     if (mainWindow.isDestroyed()) return;
-    if (event.sender.getType() !== "webview" || !isTrustedWhatsAppURL(event.sender.getURL())) return;
+    if (!isWhatsAppPage(event.sender)) return;
     if (!detail || typeof detail !== "object") return;
     // The count is the page's own tab's: a page can rewrite the tab ID the
     // window gave it, not the session it runs in.
