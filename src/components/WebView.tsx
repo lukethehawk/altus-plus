@@ -88,7 +88,6 @@ const WebView: Component<{ tab: Tab }> = (props) => {
       id={`webview-${props.tab.id}`}
       src="https://web.whatsapp.com"
       partition={`persist:${props.tab.id}`}
-      preload={window.whatsappPreloadPath}
       webpreferences={`spellcheck=${props.tab.config.spellChecker}`}
     />
   );

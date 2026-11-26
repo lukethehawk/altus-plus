@@ -21,7 +21,6 @@ export const SettingsSchema = z.object({
   showSaveDialog: z.object({ value: z.boolean() }),
   defaultDownloadDir: z.object({ value: z.string() }),
   customTitlebar: z.object({ value: z.boolean() }),
-  systemScrollbars: z.object({ value: z.boolean() }),
   rememberWindowSize: z.object({ value: z.boolean() }),
   rememberWindowPosition: z.object({ value: z.boolean() }),
   language: z.object({ value: z.enum(languages) }),
@@ -54,7 +53,6 @@ export const DefaultSettingValues = {
   showSaveDialog: true,
   defaultDownloadDir: "",
   customTitlebar: false,
-  systemScrollbars: false,
   rememberWindowSize: false,
   rememberWindowPosition: false,
   language: "en",
@@ -80,7 +78,6 @@ export const getDefaultSettings = (): Settings => ({
   showSaveDialog: { value: DefaultSettingValues.showSaveDialog },
   defaultDownloadDir: { value: DefaultSettingValues.defaultDownloadDir },
   customTitlebar: { value: DefaultSettingValues.customTitlebar },
-  systemScrollbars: { value: DefaultSettingValues.systemScrollbars },
   rememberWindowSize: { value: DefaultSettingValues.rememberWindowSize },
   rememberWindowPosition: {
     value: DefaultSettingValues.rememberWindowPosition,

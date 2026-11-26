@@ -17,7 +17,6 @@ import {
 } from "electron";
 import fs from "fs";
 import path from "path";
-import { pathToFileURL } from "url";
 import { electronTabStore } from "./stores/tabs/electron";
 import { Tab, TabStore } from "./stores/tabs/common";
 import { electronThemeStore } from "./stores/themes/electron";
@@ -1042,12 +1041,6 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
       }
       return listener(event, ...args);
     });
-
-  handle("get-whatsapp-preload-path", () => {
-    // Vite 8 does not turn import.meta.url into a file URL in the CommonJS
-    // main bundle, so build it from __dirname.
-    return pathToFileURL(path.join(__dirname, "whatsapp.preload.cjs")).href;
-  });
 
   // The window asks which account opens a whatsapp:// link from now on; one
   // that arrived earlier (the link the app was started with) is handed over.

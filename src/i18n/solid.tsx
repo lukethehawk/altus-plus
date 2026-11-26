@@ -5,6 +5,7 @@ import {
   createResource,
   onCleanup,
 } from "solid-js";
+import { isDev } from "../utils/isDev";
 
 type I18NContextType = {
   t: (key: string) => string;
@@ -26,10 +27,14 @@ export const I18NProvider: Component<{
   onCleanup(cleanup);
 
   const t = (key: string) => {
-    const value = translations()?.current?.[key];
+    const loaded = translations();
+    const value = loaded?.current?.[key];
     if (!value) {
-      window.i18n.keyMissing(key);
-      return translations()?.fallback?.[key] || key;
+      // Only development runs record missing keys (main ignores the rest),
+      // and only once the translations are there: before that every key
+      // looks missing.
+      if (isDev && loaded) void window.i18n.keyMissing(key);
+      return loaded?.fallback?.[key] || key;
     }
     return value;
   };
