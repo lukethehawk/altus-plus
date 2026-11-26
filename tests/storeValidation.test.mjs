@@ -19,7 +19,7 @@ register(
       }`)
 );
 
-const { isValidTabStoreValue, isValidThemeStoreValue, usableTabs } = await import(
+const { isValidSettingUpdate, isValidTabStoreValue, isValidThemeStoreValue, usableTabs } = await import(
   "../src/utils/storeValidation.ts"
 );
 const { ThemeStoreDefaults } = await import("../src/stores/themes/common.ts");
@@ -147,4 +147,29 @@ test("main reads only tabs with an ID, from a list", () => {
   // Whatever else a saved tab holds is left to the readers, as before.
   const odd = { id: alfa.id, name: 42, config: "smoke" };
   assert.deepEqual(usableTabs([odd]), [odd]);
+});
+
+test("a setting is saved only under a known key, with a value that key accepts", () => {
+  assert.equal(isValidSettingUpdate("trayIcon", false), true);
+  assert.equal(isValidSettingUpdate("language", "it"), true);
+  assert.equal(isValidSettingUpdate("defaultDownloadDir", "C:\Downloads"), true);
+  // No value deletes the setting.
+  assert.equal(isValidSettingUpdate("trayIcon", undefined), true);
+  for (const [key, value] of [
+    ["trayIcon", "yes"],
+    ["trayIcon", null],
+    ["language", "de"],
+    ["tabBarPosition", "left"],
+    ["defaultDownloadDir", 42],
+    // Removed in 5.8.1-plus.31, and never in the schema of this version.
+    ["systemScrollbars", true],
+    ["smoke", true],
+    ["__proto__", {}],
+    ["constructor", undefined],
+    ["toString", undefined],
+    [42, true],
+    [undefined, undefined],
+  ]) {
+    assert.equal(isValidSettingUpdate(key, value), false, `${String(key)} = ${JSON.stringify(value)}`);
+  }
 });

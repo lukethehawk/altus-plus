@@ -21,7 +21,12 @@ import { electronTabStore } from "./stores/tabs/electron";
 import { Tab, TabStore } from "./stores/tabs/common";
 import { electronThemeStore } from "./stores/themes/electron";
 import { ThemeStore } from "./stores/themes/common";
-import { isValidTabStoreValue, isValidThemeStoreValue, usableTabs } from "./utils/storeValidation";
+import {
+  isValidSettingUpdate,
+  isValidTabStoreValue,
+  isValidThemeStoreValue,
+  usableTabs,
+} from "./utils/storeValidation";
 import { electronSettingsStore } from "./stores/settings/electron";
 import { openStore, setAsideStores } from "./stores/openStore";
 import { positionOnScreen } from "./utils/windowPosition";
@@ -90,11 +95,13 @@ import {
 } from "./updater";
 import {
   getSafeExternalHttpURL,
-  isAltusPartition,
+  isAllowedWebview,
   isTrustedWhatsAppURL,
   isWhatsAppPage,
+  lockDownWebview,
   onlyFromSender,
 } from "./utils/security";
+import { nextZoomFactor, reportedUnreadCount } from "./utils/pageMessages";
 import { TabSessions } from "./utils/tabSessions";
 import { allowPermissionCheck, allowPermissionRequest } from "./utils/permissions";
 import { isFullFolderPath } from "./utils/downloads";
@@ -104,7 +111,6 @@ import {
   findWhatsAppLink,
   whatsAppWebAddress,
 } from "./utils/whatsappLinks";
-import { SettingsSchema } from "./stores/settings/common";
 
 const windowState = openStore<{
   width: number | null;
@@ -555,18 +561,11 @@ function createWindow() {
   mainWindow.webContents.on(
     "will-attach-webview",
     (event, webPreferences, params) => {
-      if (
-        !isTrustedWhatsAppURL(params.src) ||
-        !isAltusPartition(params.partition)
-      ) {
+      if (!isAllowedWebview(params.src, params.partition)) {
         event.preventDefault();
         return;
       }
-      webPreferences.preload = path.join(__dirname, "whatsapp.preload.cjs");
-      webPreferences.nodeIntegration = false;
-      webPreferences.nodeIntegrationInSubFrames = false;
-      webPreferences.contextIsolation = true;
-      webPreferences.sandbox = true;
+      lockDownWebview(webPreferences, path.join(__dirname, "whatsapp.preload.cjs"));
       // Before the page loads, not once it has (the window used to ask).
       setUpTabPermissions(params.partition);
     }
@@ -1064,13 +1063,9 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
 
   handle(
     "settings-store-set",
-    (_event, key: SettingKey, value: unknown) => {
-      if (typeof key !== "string" || !Object.prototype.hasOwnProperty.call(SettingsSchema.shape, key)) {
-        throw new Error("Invalid setting key");
-      }
+    (_event, key: unknown, value: unknown) => {
+      if (!isValidSettingUpdate(key, value)) throw new Error("Invalid setting update");
       if (value === undefined) return electronSettingsStore.delete(key);
-      const parsed = SettingsSchema.shape[key].safeParse({ value });
-      if (!parsed.success) throw new Error("Invalid setting value");
       if (key === "autoHideMenuBar") {
         changeAutoHideMenuBar(mainWindow, value as boolean);
       } else if (key === "trayIcon") {
@@ -1223,21 +1218,10 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     mainWindow.webContents.send("select-tab", tabId);
   });
 
-  ipcMain.on("zoom", ({ sender }, type) => {
+  ipcMain.on("zoom", ({ sender }, change: unknown) => {
     if (!isWhatsAppPage(sender)) return;
-    if (!["in", "out", "reset"].includes(type)) return;
-    const currentZoomFactor = sender.getZoomFactor();
-    switch (type) {
-      case "in":
-        sender.setZoomFactor(Math.min(2.5, currentZoomFactor + 0.1));
-        break;
-      case "out":
-        sender.setZoomFactor(Math.max(0.5, currentZoomFactor - 0.1));
-        break;
-      default:
-        sender.setZoomFactor(1);
-        break;
-    }
+    const zoomFactor = nextZoomFactor(sender.getZoomFactor(), change);
+    if (zoomFactor !== undefined) sender.setZoomFactor(zoomFactor);
   });
 
   ipcMain.on("message-count", (event, detail: unknown) => {
@@ -1245,20 +1229,18 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     // meanwhile still arrive (often right after a start, while they sync).
     if (mainWindow.isDestroyed()) return;
     if (!isWhatsAppPage(event.sender)) return;
-    if (!detail || typeof detail !== "object") return;
+    const messageCount = reportedUnreadCount(detail);
     // The count is the page's own tab's: a page can rewrite the tab ID the
     // window gave it, not the session it runs in.
     const tabId = tabSessions.tabOf(event.sender.session);
-    const { messageCount } = detail as { messageCount?: unknown };
-    if (tabId === undefined || !Number.isSafeInteger(messageCount) ||
-        (messageCount as number) < 0 || (messageCount as number) > 100000) return;
+    if (tabId === undefined || messageCount === undefined) return;
     const tabs = savedTabs();
     const activeIds = new Set(tabs.map((tab) => tab.id));
     if (!activeIds.has(tabId)) return;
     for (const id of unreadByTab.keys()) {
       if (!activeIds.has(id)) unreadByTab.delete(id);
     }
-    unreadByTab.set(tabId, messageCount as number);
+    unreadByTab.set(tabId, messageCount);
     resourceTest?.accountLoaded(tabId, tabs.find((tab) => tab.id === tabId)?.name ?? "");
     mainWindow.webContents.send("message-count", { tabId, messageCount });
     updateUnreadIndicators(mainWindow, tabs);

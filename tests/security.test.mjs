@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   getSafeExternalHttpURL,
+  isAllowedWebview,
   isAltusPartition,
   isTrustedWhatsAppURL,
   isWhatsAppPage,
+  lockDownWebview,
   onlyFromSender,
 } from "../src/utils/security.ts";
 
@@ -60,4 +62,49 @@ test("invoke handlers answer only the app window", () => {
     assert.throws(() => handler({ sender }, "key", 42), /Unauthorized IPC sender for smoke-channel/);
   }
   assert.equal(calls.length, 1, "the listener ran for another sender");
+});
+
+test("the window attaches only WhatsApp tabs in their own partition", () => {
+  assert.equal(isAllowedWebview("https://web.whatsapp.com/", "persist:smokeAlfaTab000000001"), true);
+  for (const [src, partition] of [
+    ["https://example.org/", "persist:smokeAlfaTab000000001"],
+    ["http://web.whatsapp.com/", "persist:smokeAlfaTab000000001"],
+    ["https://web.whatsapp.com/", "persist:../smokeEscape"],
+    ["https://web.whatsapp.com/", "smokeAlfaTab000000001"], // in memory only
+    ["https://web.whatsapp.com/", ""],
+    ["https://web.whatsapp.com/", undefined],
+    [undefined, "persist:smokeAlfaTab000000001"],
+  ]) {
+    assert.equal(isAllowedWebview(src, partition), false, `${src} in ${partition}`);
+  }
+});
+
+test("every WhatsApp tab runs sandboxed, without Node.js, with our preload", () => {
+  // What a window could ask for with the webview's attributes.
+  const webPreferences = {
+    preload: "C:\\smoke\\other.js",
+    nodeIntegration: true,
+    nodeIntegrationInSubFrames: true,
+    contextIsolation: false,
+    sandbox: false,
+    spellcheck: true,
+  };
+  lockDownWebview(webPreferences, "C:\\app\\whatsapp.preload.cjs");
+  assert.deepEqual(webPreferences, {
+    preload: "C:\\app\\whatsapp.preload.cjs",
+    nodeIntegration: false,
+    nodeIntegrationInSubFrames: false,
+    contextIsolation: true,
+    sandbox: true,
+    spellcheck: true,
+  });
+  const unset = {};
+  lockDownWebview(unset, "preload.cjs");
+  assert.deepEqual(unset, {
+    preload: "preload.cjs",
+    nodeIntegration: false,
+    nodeIntegrationInSubFrames: false,
+    contextIsolation: true,
+    sandbox: true,
+  });
 });

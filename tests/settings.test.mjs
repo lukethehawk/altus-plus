@@ -22,8 +22,8 @@ register(
 const { DefaultSettingValues, SettingsSchema, getDefaultSettings } =
   await import("../src/stores/settings/common.ts");
 
-// main.ts validates each "settings-store-set" call with
-// SettingsSchema.shape[key].safeParse({ value }).
+// main checks each "settings-store-set" call with isValidSettingUpdate
+// (src/utils/storeValidation.ts): SettingsSchema.shape[key].safeParse({ value }).
 const accepts = (key, value) =>
   SettingsSchema.shape[key].safeParse({ value }).success;
 
