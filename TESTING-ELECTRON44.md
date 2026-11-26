@@ -263,7 +263,10 @@ fails it uploads no installer.
    bar (the bar used to vanish at once, leaving a window without buttons).
    The window's listeners get the message alone, not Electron's event
    object, and the title bar's blur listener returns a remover that works
-   (seen by minimizing the window, when it has the focus).
+   (seen by minimizing the window, when it has the focus). With the window
+   minimized, so that no window has the focus, Settings → Settings from the
+   title bar's menu opens Settings (before, only Help → Resource Usage and
+   Run Resource Test reached an unfocused window).
    Help → Run Resource Test… → Restart and Measure restarts the app into
    the test with three tabs, which change their title every 20 ms
    beforehand, so unread counts keep arriving while the app closes (one

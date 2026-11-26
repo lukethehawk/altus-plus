@@ -137,6 +137,26 @@ const unreadByTab = new Map<string, number>();
 /** The saved tabs: a list, and only tabs whose ID can name a partition. */
 const savedTabs = () => usableTabs(electronTabStore.get("tabs"));
 
+/** The app's window: the only one it opens (message boxes are not windows). */
+const appWindow = (): BrowserWindow | undefined => BrowserWindow.getAllWindows()[0];
+
+/** Brings a window to the front, restoring it if it was minimized. */
+function showWindow(window: BrowserWindow) {
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+/**
+ * A menu item that asks the app window to act: open a dialog, switch tabs…
+ * Sent to the focused window, else to the app window: the custom title bar's
+ * menu is part of the app window, which may not have the focus.
+ */
+const sendToWindow = (channel: string) => () => {
+  const window = BrowserWindow.getFocusedWindow() ?? appWindow();
+  window?.webContents.send(channel);
+};
+
 /** Hovering the tray icon shows the unread chats of every account. */
 function updateTrayTooltip(tabs?: Tab[]) {
   if (!tray || tray.isDestroyed()) return;
@@ -625,13 +645,9 @@ if (!singleInstanceLock) {
   app.exit();
 } else {
   app.on("second-instance", (_, argv) => {
-    if (BrowserWindow.getAllWindows().length === 0) return;
-
-    const mainWindow = BrowserWindow.getAllWindows()[0];
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-
+    const mainWindow = appWindow();
+    if (!mainWindow) return;
+    showWindow(mainWindow);
     handleWhatsappLinks(argv);
   });
 
@@ -777,36 +793,21 @@ if (!singleInstanceLock) {
         showSaveImageAs: true,
         showInspectElement: true,
         labels: localizedContextMenuLabels,
-        append: (def, params, window) => [
-          {
-            label: electronI18N.t("Bold"),
+        append: (def, params, window) => {
+          // WhatsApp's formatting marks, around the selection in the text
+          // being written (src/whatsapp.preload.ts).
+          const format = (label: string, mark: string) => ({
+            label,
             visible: params.isEditable,
-            click: () => {
-              (window as BrowserWindow).webContents.send("format-text", "*");
-            },
-          },
-          {
-            label: electronI18N.t("Italic"),
-            visible: params.isEditable,
-            click: () => {
-              (window as BrowserWindow).webContents.send("format-text", "_");
-            },
-          },
-          {
-            label: electronI18N.t("Strike"),
-            visible: params.isEditable,
-            click: () => {
-              (window as BrowserWindow).webContents.send("format-text", "~");
-            },
-          },
-          {
-            label: electronI18N.t("Monospaced"),
-            visible: params.isEditable,
-            click: () => {
-              (window as BrowserWindow).webContents.send("format-text", "```");
-            },
-          },
-        ],
+            click: () => (window as BrowserWindow).webContents.send("format-text", mark),
+          });
+          return [
+            format(electronI18N.t("Bold"), "*"),
+            format(electronI18N.t("Italic"), "_"),
+            format(electronI18N.t("Strike"), "~"),
+            format(electronI18N.t("Monospaced"), "```"),
+          ];
+        },
       });
     }
 
@@ -851,7 +852,7 @@ function handleWhatsappLinks(argv: string[]) {
     console.warn("Ignored a whatsapp:// link that is not a chat or a group invite");
     return;
   }
-  const mainWindow = BrowserWindow.getAllWindows()[0];
+  const mainWindow = appWindow();
   if (windowTakesWhatsAppLinks && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("open-whatsapp-link", address);
   } else {
@@ -1219,9 +1220,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     const tabId = tabSessions.tabOf(sender.session);
     if (tabId === undefined || !savedTabs().some((tab) => tab.id === tabId)) return;
     if (mainWindow.isDestroyed()) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    showWindow(mainWindow);
     mainWindow.webContents.send("select-tab", tabId);
   });
 
@@ -1376,10 +1375,7 @@ function getLocalizedMainMenu() {
       submenu: [
         {
           label: electronI18N.t("Start &New Chat"),
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("new-chat");
-          },
+          click: sendToWindow("new-chat"),
           id: "start-new-chat",
         },
         {
@@ -1457,46 +1453,31 @@ function getLocalizedMainMenu() {
         {
           label: electronI18N.t("Add New Tab"),
           accelerator: "CmdOrCtrl+T",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("add-new-tab");
-          },
+          click: sendToWindow("add-new-tab"),
           id: "add-new-tab",
         },
         {
           label: electronI18N.t("Edit Active Tab"),
           accelerator: "CmdOrCtrl+E",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("edit-active-tab");
-          },
+          click: sendToWindow("edit-active-tab"),
           id: "edit-active-tab",
         },
         {
           label: electronI18N.t("Close Active Tab"),
           accelerator: "CmdOrCtrl+W",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("close-active-tab");
-          },
+          click: sendToWindow("close-active-tab"),
           id: "close-active-tab",
         },
         {
           label: electronI18N.t("Open Tab DevTools"),
           accelerator: "CmdOrCtrl+Shift+D",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("open-tab-devtools");
-          },
+          click: sendToWindow("open-tab-devtools"),
           id: "open-tab-devtools",
         },
         {
           label: electronI18N.t("Restore Tab"),
           accelerator: "CmdOrCtrl+Shift+T",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("restore-tab");
-          },
+          click: sendToWindow("restore-tab"),
           id: "restore-tab",
         },
         {
@@ -1505,19 +1486,13 @@ function getLocalizedMainMenu() {
         {
           label: electronI18N.t("Go to Next Tab"),
           accelerator: "CmdOrCtrl+Tab",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("next-tab");
-          },
+          click: sendToWindow("next-tab"),
           id: "next-tab",
         },
         {
           label: electronI18N.t("Go to Previous Tab"),
           accelerator: "CmdOrCtrl+Shift+Tab",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("previous-tab");
-          },
+          click: sendToWindow("previous-tab"),
           id: "previous-tab",
         },
         {
@@ -1526,19 +1501,13 @@ function getLocalizedMainMenu() {
         {
           label: electronI18N.t("Go to First Tab"),
           accelerator: "CmdOrCtrl+1",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("first-tab");
-          },
+          click: sendToWindow("first-tab"),
           id: "first-tab",
         },
         {
           label: electronI18N.t("Go to Last Tab"),
           accelerator: "CmdOrCtrl+9",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("last-tab");
-          },
+          click: sendToWindow("last-tab"),
           id: "last-tab",
         },
         {
@@ -1561,10 +1530,7 @@ function getLocalizedMainMenu() {
         {
           label: electronI18N.t("Theme Manager"),
           accelerator: "Alt+T",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("open-theme-manager");
-          },
+          click: sendToWindow("open-theme-manager"),
           id: "open-theme-manager",
         },
       ],
@@ -1575,10 +1541,7 @@ function getLocalizedMainMenu() {
         {
           label: electronI18N.t("&Settings"),
           accelerator: "Ctrl+,",
-          click() {
-            const window = BrowserWindow.getFocusedWindow();
-            if (window) window.webContents.send("open-settings");
-          },
+          click: sendToWindow("open-settings"),
           id: "open-settings",
         },
       ],
@@ -1634,10 +1597,7 @@ ${aboutDialogText}`,
         },
         {
           label: electronI18N.t("Resource Usage"),
-          click() {
-            const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-            if (window) window.webContents.send("open-resource-usage");
-          },
+          click: sendToWindow("open-resource-usage"),
           id: "resource-usage",
         },
         resourceTestMode
@@ -1648,10 +1608,7 @@ ${aboutDialogText}`,
             }
           : {
               label: electronI18N.t("Run Resource Test…"),
-              click() {
-                const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-                if (window) window.webContents.send("open-resource-test");
-              },
+              click: sendToWindow("open-resource-test"),
               id: "resource-test",
             },
         {
@@ -1706,17 +1663,11 @@ function getLocalizedTrayMenu() {
   )[] = [
     {
       label: electronI18N.t("Maximize"),
-      click() {
-        const window = BrowserWindow.getAllWindows()[0];
-        if (window) window.show();
-      },
+      click: () => appWindow()?.show(),
     },
     {
       label: electronI18N.t("Minimize to Tray"),
-      click() {
-        const window = BrowserWindow.getAllWindows()[0];
-        if (window) window.hide();
-      },
+      click: () => appWindow()?.hide(),
     },
     {
       label: electronI18N.t("Quit"),
