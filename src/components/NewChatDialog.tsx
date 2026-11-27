@@ -1,7 +1,8 @@
 import { Dialog, TextField } from "@kobalte/core";
 import CloseIcon from "../icons/CloseIcon";
-import { createSignal, useContext } from "solid-js";
-import { getActiveWebviewElement } from "../stores/tabs/solid";
+import { Show, createSignal, useContext } from "solid-js";
+import { getActiveWebviewElement, tabStore } from "../stores/tabs/solid";
+import { serviceOfTab } from "../utils/services";
 import { I18NContext } from "../i18n/solid";
 import { whatsAppChatAddress } from "../utils/whatsappLinks";
 
@@ -9,6 +10,11 @@ const NewChatDialog = (props: { close: () => void }) => {
   const { t } = useContext(I18NContext);
   const [phoneNumber, setPhoneNumber] = createSignal("");
   const [invalidNumber, setInvalidNumber] = createSignal(false);
+  // A chat by phone number is WhatsApp's.
+  const inWhatsAppTab = () => {
+    const activeTab = tabStore.tabs.find((tab) => tab.id === tabStore.selectedTabId);
+    return !!activeTab && serviceOfTab(activeTab) === "whatsapp";
+  };
 
   return (
     <Dialog.Portal>
@@ -35,54 +41,63 @@ const NewChatDialog = (props: { close: () => void }) => {
             </Dialog.CloseButton>
           </div>
           <Dialog.Description class="pt-0.5 pb-2">
-            <form
-              onSubmit={(event) => {
-                // The page itself must never navigate to the form's target.
-                event.preventDefault();
-                if (!phoneNumber().trim()) return;
-                const address = whatsAppChatAddress(phoneNumber());
-                if (!address) {
-                  setInvalidNumber(true);
-                  return;
-                }
-                const activeWebview = getActiveWebviewElement();
-                if (!activeWebview) return;
-                activeWebview.src = address;
-                props.close();
-              }}
+            <Show
+              when={inWhatsAppTab()}
+              fallback={
+                <div class="py-2 text-sm max-w-[40ch]" data-new-chat-whatsapp-only>
+                  {t("A new chat by phone number works in WhatsApp tabs only.")}
+                </div>
+              }
             >
-              <TextField.Root
-                class="flex flex-col gap-1.5 py-2"
-                value={phoneNumber()}
-                onChange={(value) => {
-                  setPhoneNumber(value);
-                  setInvalidNumber(false);
+              <form
+                onSubmit={(event) => {
+                  // The page itself must never navigate to the form's target.
+                  event.preventDefault();
+                  if (!phoneNumber().trim()) return;
+                  const address = whatsAppChatAddress(phoneNumber());
+                  if (!address) {
+                    setInvalidNumber(true);
+                    return;
+                  }
+                  const activeWebview = getActiveWebviewElement();
+                  if (!activeWebview || !inWhatsAppTab()) return;
+                  activeWebview.src = address;
+                  props.close();
                 }}
-                validationState={invalidNumber() ? "invalid" : "valid"}
               >
-                <TextField.Label class="text-[0.95rem] leading-none">
-                  {t("Phone number")}:
-                </TextField.Label>
-                <TextField.Input
-                  class="text-sm py-1.5 px-2.5 bg-zinc-700/50 border rounded border-zinc-600 outline-none focus:border-zinc-300"
-                  spellcheck={false}
-                  ref={(element) => {
-                    setTimeout(() => {
-                      element.focus();
-                    }, 5);
+                <TextField.Root
+                  class="flex flex-col gap-1.5 py-2"
+                  value={phoneNumber()}
+                  onChange={(value) => {
+                    setPhoneNumber(value);
+                    setInvalidNumber(false);
                   }}
-                />
-                <TextField.ErrorMessage class="text-sm text-red-300 leading-snug max-w-[40ch]">
-                  {t("newChatInvalidNumber")}
-                </TextField.ErrorMessage>
-              </TextField.Root>
-              <button
-                type="submit"
-                class="mt-1 text-sm py-1.5 px-2.5 bg-zinc-700/50 border rounded border-zinc-600 outline-none focus:border-zinc-300 select-none hover:bg-zinc-700 focus:bg-zinc-700 active:bg-zinc-700/75"
-              >
-                {t("Start chat")}
-              </button>
-            </form>
+                  validationState={invalidNumber() ? "invalid" : "valid"}
+                >
+                  <TextField.Label class="text-[0.95rem] leading-none">
+                    {t("Phone number")}:
+                  </TextField.Label>
+                  <TextField.Input
+                    class="text-sm py-1.5 px-2.5 bg-zinc-700/50 border rounded border-zinc-600 outline-none focus:border-zinc-300"
+                    spellcheck={false}
+                    ref={(element) => {
+                      setTimeout(() => {
+                        element.focus();
+                      }, 5);
+                    }}
+                  />
+                  <TextField.ErrorMessage class="text-sm text-red-300 leading-snug max-w-[40ch]">
+                    {t("newChatInvalidNumber")}
+                  </TextField.ErrorMessage>
+                </TextField.Root>
+                <button
+                  type="submit"
+                  class="mt-1 text-sm py-1.5 px-2.5 bg-zinc-700/50 border rounded border-zinc-600 outline-none focus:border-zinc-300 select-none hover:bg-zinc-700 focus:bg-zinc-700 active:bg-zinc-700/75"
+                >
+                  {t("Start chat")}
+                </button>
+              </form>
+            </Show>
           </Dialog.Description>
         </Dialog.Content>
       </div>

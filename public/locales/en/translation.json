@@ -120,7 +120,7 @@
   "Audio service": "Audio service",
   "Other services": "Other services",
   "Other processes": "Other processes",
-  "WhatsApp service workers": "WhatsApp service workers",
+  "Accounts' service workers": "Accounts' service workers",
   "Run Resource Test…": "Run Resource Test…",
   "End Resource Test": "End Resource Test",
   "Resource Test": "Resource Test",
@@ -220,5 +220,9 @@
   "Themes: back to the built-in ones.": "Themes: back to the built-in ones.",
   "The unreadable files were kept in the profile folder:": "The unreadable files were kept in the profile folder:",
   "OK": "OK",
-  "Show Files": "Show Files"
+  "Show Files": "Show Files",
+  "Which service should the new tab open? A tab keeps its service.": "Which service should the new tab open? A tab keeps its service.",
+  "No tab shows WhatsApp: add a WhatsApp tab to open the link.": "No tab shows WhatsApp: add a WhatsApp tab to open the link.",
+  "A new chat by phone number works in WhatsApp tabs only.": "A new chat by phone number works in WhatsApp tabs only.",
+  "Service": "Service"
 }

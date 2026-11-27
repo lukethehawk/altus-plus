@@ -70,7 +70,7 @@ const ResourceUsageDialog: Component<{
       case "service":
         return t("Other services");
       case "workers":
-        return t("WhatsApp service workers");
+        return t("Accounts' service workers");
       default:
         return t("Other processes");
     }

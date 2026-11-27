@@ -3,6 +3,7 @@ import {
   Accessor,
   Component,
   Setter,
+  Show,
   createMemo,
   createSignal,
   useContext,
@@ -15,12 +16,15 @@ import { StyledSwitch } from "./StyledSwitch";
 import StyledSelect from "./StyledSelect";
 import { I18NContext } from "../i18n/solid";
 import { ColorPickerButton } from "./ColorPickerButton";
+import { SERVICE_NAMES, serviceOfTab } from "../utils/services";
 
 const TabEditDialog: Component<{
   tabToEdit: Accessor<Tab>;
   setTabToEdit: Setter<Tab | null>;
 }> = (props) => {
   const { t } = useContext(I18NContext);
+  // Shown, not changed: the account's data stays in the tab's session.
+  const service = () => serviceOfTab(props.tabToEdit());
 
   const availableThemes = createMemo(() => {
     return themeStore.themes;
@@ -71,6 +75,9 @@ const TabEditDialog: Component<{
             </Dialog.CloseButton>
           </div>
           <Dialog.Description class="pt-0.5">
+            <div class="pt-2 text-[0.95rem] leading-none" data-tab-service={service()}>
+              {t("Service")}: {SERVICE_NAMES[service()]}
+            </div>
             <TextField.Root
               class="flex flex-col gap-1.5 py-2"
               defaultValue={props.tabToEdit().name}
@@ -91,28 +98,31 @@ const TabEditDialog: Component<{
                 spellcheck={false}
               />
             </TextField.Root>
-            <StyledSelect
-              multiple={false}
-              options={availableThemes()}
-              optionValue="id"
-              optionTextValue="name"
-              label={t("Theme")}
-              placeholder={t("selectTheme")}
-              value={theme()}
-              onChange={(theme) => {
-                if (!theme) return;
-                updateAndSyncTabStore(
-                  "tabs",
-                  (t) => t.id === props.tabToEdit().id,
-                  "config",
-                  "theme",
-                  theme.id
-                );
-              }}
-              rootClass="flex flex-col gap-1.5 py-2"
-              valueRender={(state) => state.selectedOption().name}
-              itemLabelRender={(item) => item.rawValue.name}
-            />
+            {/* Themes are WhatsApp's: Telegram has its own. */}
+            <Show when={service() === "whatsapp"}>
+              <StyledSelect
+                multiple={false}
+                options={availableThemes()}
+                optionValue="id"
+                optionTextValue="name"
+                label={t("Theme")}
+                placeholder={t("selectTheme")}
+                value={theme()}
+                onChange={(theme) => {
+                  if (!theme) return;
+                  updateAndSyncTabStore(
+                    "tabs",
+                    (t) => t.id === props.tabToEdit().id,
+                    "config",
+                    "theme",
+                    theme.id
+                  );
+                }}
+                rootClass="flex flex-col gap-1.5 py-2"
+                valueRender={(state) => state.selectedOption().name}
+                itemLabelRender={(item) => item.rawValue.name}
+              />
+            </Show>
             <div class="py-2">
               <StyledSwitch
                 checked={props.tabToEdit().config.notifications}
