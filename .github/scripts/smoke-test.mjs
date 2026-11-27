@@ -1476,12 +1476,19 @@ async function mouseClick(cdp, find, button = "left") {
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button, buttons: 0, clickCount: 1 });
 }
 
-/** Chooses an item of a tab's context menu (right click), as a user does. */
+/**
+ * Chooses an item of a tab's context menu: opened with a right click, the
+ * item chosen with Enter (a mouse click made through DevTools did not reach
+ * the item on the GitHub runner).
+ */
 async function chooseFromTabMenu(cdp, tab, label) {
   const item = `[...document.querySelectorAll('[role="menuitem"]')].find((item) => item.textContent === ${JSON.stringify(label)})`;
   await mouseClick(cdp, `document.getElementById(${JSON.stringify(tab.id)})`, "right");
   await waitFor(`"${label}" in ${tab.name}'s menu`, 5_000, () => cdp.evaluate(`!!${item}`));
-  await mouseClick(cdp, item);
+  await cdp.evaluate(`${item}.focus()`);
+  for (const type of ["keyDown", "keyUp"]) {
+    await cdp.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+  }
   await waitFor("the tab menu to close", 5_000, async () => !(await cdp.evaluate(`!!${item}`)));
 }
 
