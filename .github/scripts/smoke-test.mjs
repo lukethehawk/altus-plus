@@ -23,7 +23,8 @@
 //    Saved files left unreadable (cut off, NUL bytes) no longer stop the
 //    start: each is kept as <name>.corrupt-<time>.json, the app starts with
 //    defaults and says so, and the tab list is rebuilt from the account
-//    folders (minus the tab closed earlier), deleting nothing;
+//    folders (minus the tab closed earlier), deleting nothing; a folder
+//    with Telegram's data comes back as a Telegram tab;
 // 5. tabs in the background, also with the whole app in the tray, keep
 //    playing sound (also after switching tab) and show notifications labelled
 //    with their account, and a muted account's notification is suppressed.
@@ -43,7 +44,14 @@
 //    Help → Resource Usage lists every account and recognises every process.
 //    A whatsapp:// link reaching the running app asks which account opens it
 //    (Cancel opens nothing; a link that is not a chat or invite is ignored).
-//    It plays a near-silent tone and shows a silent notification for a moment;
+//    It plays a near-silent tone and shows a silent notification for a moment.
+//    A Telegram account next to a WhatsApp one: the Telegram tab reaches
+//    Telegram Web (K version) with its own preload, gets notifications
+//    labelled with its account (none while muted) and its unread count from
+//    the page's app badge, on its own tab; it stays on the K version and on
+//    Telegram (a redirect to WhatsApp is cancelled, as one from WhatsApp to
+//    Telegram), opens nothing without a click, and the window cannot change
+//    a tab's service. "+" asks for the service, WhatsApp first;
 // 6. With the custom title bar, turning it off and reloading the page's
 //    settings keeps it until the restart, which comes without it. The
 //    window's listeners get the message alone, not Electron's event, and
@@ -81,8 +89,8 @@
 // on a GitHub-hosted runner, which is discarded afterwards. The app is
 // observed through Chromium's DevTools protocol (--remote-debugging-port) and
 // stopped by PID. Failures leave logs and screenshots in smoke-artifacts/.
-// A tab that does not reach WhatsApp Web in 90 s is reloaded once, and the
-// notes say what every page of the app was doing then.
+// A tab that does not reach its service's page in 90 s is reloaded once, and
+// the notes say what every page of the app was doing then.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
@@ -334,6 +342,12 @@ async function describeTargets(port) {
   return lines;
 }
 
+/** The page each service's tabs reach: src, the address and the title. */
+const SERVICE_PAGES = {
+  whatsapp: { name: "WhatsApp Web", src: /^https:\/\/web\.whatsapp\.com(\/|$)/, prefix: "https://web.whatsapp.com/", title: "WhatsApp" },
+  telegram: { name: "Telegram Web", src: /^https:\/\/web\.telegram\.org\/k\//, prefix: "https://web.telegram.org/k/", title: "Telegram" },
+};
+
 const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -341,9 +355,10 @@ const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 /**
  * Starts the app, reloads its window with DevTools attached and checks the
- * window, its tabs and every tab's WhatsApp Web page. Returns failure messages.
+ * window, its tabs and every tab's page. Returns failure messages.
  * expected: { label, otherLabel, tabNames, tabIds? (exact, in any order), tabCount,
- *   windowShown, afterLoad?({ cdp, port, failures, notes }) }
+ *   services? ({ [tabId]: "telegram" }; the others WhatsApp), windowShown,
+ *   afterLoad?({ cdp, port, failures, notes }) }
  */
 async function checkRunningApp(name, exe, args, expected, port) {
   const failures = [];
@@ -394,22 +409,23 @@ async function checkRunningApp(name, exe, args, expected, port) {
       tabIds.push(id);
       if (webview.partition !== `persist:${id}`) failures.push(`tab ${id} uses partition ${webview.partition}`);
       // src follows navigation (e.g. WhatsApp's /login/), so only the origin is fixed.
-      if (!/^https:\/\/web\.whatsapp\.com(\/|$)/.test(webview.src ?? "")) failures.push(`tab ${id} loads ${webview.src}`);
+      if (!SERVICE_PAGES[expected.services?.[id] ?? "whatsapp"].src.test(webview.src ?? "")) failures.push(`tab ${id} loads ${webview.src}`);
     }
     if (expected.tabIds && !sameJson([...tabIds].sort(), [...expected.tabIds].sort())) {
       failures.push(`tab IDs ${tabIds.join(", ")} instead of ${expected.tabIds.join(", ")}`);
     }
     const loadFailures = failures.length;
 
-    // Each tab reaches WhatsApp Web and its preload reports the tab's ID.
+    // Each tab reaches its service's page and its preload reports the tab's ID.
     for (const id of tabIds) {
+      const service = SERVICE_PAGES[expected.services?.[id] ?? "whatsapp"];
       const loaded = async () => {
         for (const target of await targets(port)) {
-          if (target.type !== "webview" || !target.url.startsWith("https://web.whatsapp.com/")) continue;
+          if (target.type !== "webview" || !target.url.startsWith(service.prefix)) continue;
           const webview = await Cdp.connect(target.webSocketDebuggerUrl);
           try {
             const value = await webview.evaluate(`({ tabId: document.body?.dataset.tabId ?? null, title: document.title })`);
-            if (value.tabId === id && value.title.includes("WhatsApp")) return value;
+            if (value.tabId === id && value.title.includes(service.title)) return value;
           } finally {
             webview.close();
           }
@@ -417,15 +433,15 @@ async function checkRunningApp(name, exe, args, expected, port) {
         return null;
       };
       try {
-        await waitFor(`WhatsApp Web in tab ${id}`, 90_000, loaded);
+        await waitFor(`${service.name} in tab ${id}`, 90_000, loaded);
       } catch {
-        notes.push(`tab ${id}: WhatsApp Web did not load in 90s, reloaded it once`);
+        notes.push(`tab ${id}: ${service.name} did not load in 90s, reloaded it once`);
         // Where it was stuck, noted even when the reload helps.
         notes.push(...(await describeTargets(port)).map((line) => `tab ${id} at 90s: ${line}`));
         notes.push(...appErrorLines(app.output).slice(0, 3).map((line) => `tab ${id} at 90s, app log: ${line}`));
         await cdp.evaluate(`document.getElementById(${JSON.stringify(`webview-${id}`)}).reload()`);
         try {
-          await waitFor(`WhatsApp Web in tab ${id}`, 60_000, loaded);
+          await waitFor(`${service.name} in tab ${id}`, 60_000, loaded);
         } catch (error) {
           failures.push(error.message);
         }
@@ -592,6 +608,7 @@ function checkAppFiles() {
     packageJson.main,
     `${build}/preload.cjs`,
     `${build}/whatsapp.preload.cjs`,
+    `${build}/telegram.preload.cjs`,
     ".vite/renderer/main_window/index.html",
     ...publicFiles("assets/icons").map((file) => `${build}/${file}`),
     ...publicFiles("locales").filter((file) => file.endsWith("/translation.json")).map((file) => `${build}/${file}`),
@@ -861,6 +878,8 @@ async function checkStartInTray() {
 // Saved files a power cut or a disk fault left unreadable, in a profile that
 // holds two accounts, a tab closed earlier and a stray file.
 const REBUILT_ACCOUNT_FOLDERS = ["smokerebuiltalfa01", "smokerebuiltbeta02"];
+// Holds Telegram's data, in the folder Chromium names after its site.
+const REBUILT_TELEGRAM_FOLDER = "smokerebuilttango04";
 const REBUILT_CLOSED_TAB = "SmokeRebuiltClosed3";
 const UNREADABLE_FILES = {
   // Cut off mid-write; Italian and Start in tray would show if it were read.
@@ -874,26 +893,29 @@ const UNREADABLE_NOTICE_TITLE = "Some saved data could not be read";
 /**
  * Unreadable settings, tabs, themes and window size: the app still starts,
  * on defaults (English, window shown), with the accounts rebuilt as
- * "Account 1" and "Account 2" from their folders and a notice; each file is
- * kept, byte for byte, next to the new one; nothing is deleted.
+ * "Account 1" and "Account 2" from their folders, and "Account 3" as a
+ * Telegram tab from the folder with Telegram's data, and a notice; each file
+ * is kept, byte for byte, next to the new one; nothing is deleted.
  */
 async function checkUnreadableStores() {
   const profile = fs.mkdtempSync(path.join(TEMP, "as-p-"));
   for (const [name, contents] of Object.entries(UNREADABLE_FILES)) fs.writeFileSync(path.join(profile, `${name}.json`), contents);
   const partitions = path.join(profile, "Partitions");
-  for (const folder of [...REBUILT_ACCOUNT_FOLDERS, REBUILT_CLOSED_TAB.toLowerCase()]) {
+  for (const folder of [...REBUILT_ACCOUNT_FOLDERS, REBUILT_TELEGRAM_FOLDER, REBUILT_CLOSED_TAB.toLowerCase()]) {
     fs.mkdirSync(path.join(partitions, folder), { recursive: true });
     fs.writeFileSync(path.join(partitions, folder, "marker"), "");
   }
+  fs.mkdirSync(path.join(partitions, REBUILT_TELEGRAM_FOLDER, "IndexedDB", "https_web.telegram.org_0.indexeddb.leveldb"), { recursive: true });
   fs.writeFileSync(path.join(partitions, "smokestrayfile"), "");
   fs.writeFileSync(path.join(profile, "closed-tabs.json"), JSON.stringify({ ids: [REBUILT_CLOSED_TAB] }));
 
   const result = await checkRunningApp("unreadable-stores", PACKAGED_EXE, [`--user-data-dir=${profile}`], {
     label: ADD_TAB_LABEL.en,
     otherLabel: ADD_TAB_LABEL.it,
-    tabNames: ["Account 1", "Account 2"],
-    tabIds: REBUILT_ACCOUNT_FOLDERS,
-    tabCount: REBUILT_ACCOUNT_FOLDERS.length,
+    tabNames: ["Account 1", "Account 2", "Account 3"],
+    tabIds: [...REBUILT_ACCOUNT_FOLDERS, REBUILT_TELEGRAM_FOLDER],
+    tabCount: REBUILT_ACCOUNT_FOLDERS.length + 1,
+    services: { [REBUILT_TELEGRAM_FOLDER]: "telegram" },
     windowShown: true,
     afterLoad: async ({ app, failures }) => {
       try {
@@ -916,14 +938,14 @@ async function checkUnreadableStores() {
   }
   try {
     const saved = readJson(path.join(profile, "tabs.json"));
-    const names = saved.tabs.map((tab) => `${tab.id}=${tab.name}`);
-    if (!sameJson(names, ["smokerebuiltalfa01=Account 1", "smokerebuiltbeta02=Account 2"])) {
+    const names = saved.tabs.map((tab) => `${tab.id}=${tab.name}${tab.service ? ` (${tab.service})` : ""}`);
+    if (!sameJson(names, ["smokerebuiltalfa01=Account 1", "smokerebuiltbeta02=Account 2", "smokerebuilttango04=Account 3 (telegram)"])) {
       result.failures.push(`the new tabs.json holds ${names.join(", ")}`);
     }
   } catch (error) {
     result.failures.push(`the new tabs.json cannot be read: ${error.message}`);
   }
-  const deleted = [...REBUILT_ACCOUNT_FOLDERS, REBUILT_CLOSED_TAB.toLowerCase()].filter((folder) => !fs.existsSync(path.join(partitions, folder, "marker")));
+  const deleted = [...REBUILT_ACCOUNT_FOLDERS, REBUILT_TELEGRAM_FOLDER, REBUILT_CLOSED_TAB.toLowerCase()].filter((folder) => !fs.existsSync(path.join(partitions, folder, "marker")));
   if (deleted.length) result.failures.push(`deleted account data while rebuilding the tab list: ${deleted.join(", ")}`);
   if (!recordedClosedTabs(profile).includes(REBUILT_CLOSED_TAB)) result.failures.push("forgot the tab closed earlier in closed-tabs.json");
   removeTemp(profile);
@@ -945,16 +967,16 @@ const BACKGROUND_TABS = [
 }));
 const [ALFA, BETA, GAMMA] = BACKGROUND_TABS;
 
-/** DevTools connection to the WhatsApp page of a tab; the caller closes it. */
-async function connectToTab(port, id) {
+/** DevTools connection to the service's page of a tab; the caller closes it. */
+async function connectToTab(port, id, service = "whatsapp") {
   for (const target of await targets(port)) {
-    if (target.type !== "webview" || !target.url.startsWith("https://web.whatsapp.com/")) continue;
+    if (target.type !== "webview" || !target.url.startsWith(SERVICE_PAGES[service].prefix)) continue;
     const page = await Cdp.connect(target.webSocketDebuggerUrl);
     const tabId = await page.evaluate("document.body?.dataset.tabId ?? null").catch(() => null);
     if (tabId === id) return page;
     page.close();
   }
-  throw new Error(`no WhatsApp page for tab ${id}`);
+  throw new Error(`no ${SERVICE_PAGES[service].name} page for tab ${id}`);
 }
 
 // A 440 Hz tone at about -57 dBFS: above the level Chromium counts as
@@ -1396,6 +1418,242 @@ async function checkLinkChooser(cdp, profile, failures) {
   }
 }
 
+// --- check 5: a Telegram account next to a WhatsApp one --------------------
+
+// Alfa (WhatsApp) is selected; Tango (Telegram) is in the background.
+const TANGO = { ...ALFA, id: "smokeTangoTab00000004", name: "Tango", service: "telegram" };
+const TELEGRAM_TABS = [ALFA, TANGO];
+/** Where the test's redirect in Tango starts: a Telegram address no page uses. */
+const TELEGRAM_REDIRECT_START = "https://web.telegram.org/k/altus-plus-smoke-redirect";
+const EN = JSON.parse(read("public/locales/en/translation.json"));
+
+/** Whether the page has a function of its own in place of the browser's. */
+const hooked = (expression) => `!String(${expression}).includes("[native code]")`;
+
+/**
+ * A page of the tab's service that answers with a redirect to target is not
+ * followed: the tab stays on prefix. Returns what went wrong, or null.
+ */
+async function followedRedirect(cdp, page, tabId, start, target, prefix) {
+  let redirected = false;
+  const listener = ({ method, params }) => {
+    if (method !== "Fetch.requestPaused") return;
+    redirected = true;
+    page.send("Fetch.fulfillRequest", {
+      requestId: params.requestId,
+      responseCode: 302,
+      responseHeaders: [{ name: "Location", value: target }],
+    }).catch(() => {});
+  };
+  page.listeners.push(listener);
+  try {
+    // Past the service worker, straight to the interception.
+    await page.send("Network.enable");
+    await page.send("Network.setBypassServiceWorker", { bypass: true });
+    await page.send("Fetch.enable", { patterns: [{ urlPattern: `${start}*` }] });
+    await page.evaluate(`location.href = ${JSON.stringify(start)}; true`);
+    await sleep(5000);
+    const url = await cdp.evaluate(webviewCall(tabId, "getURL"));
+    if (!redirected) return `${start} was never requested`;
+    return url.startsWith(prefix) ? null : `a redirect to ${target} was followed: the tab shows ${url}`;
+  } finally {
+    await page.send("Fetch.disable").catch(() => {});
+    await page.send("Network.setBypassServiceWorker", { bypass: false }).catch(() => {});
+    page.listeners.splice(page.listeners.indexOf(listener), 1);
+  }
+}
+
+/** Clicks the middle of the element find (an expression) returns, with the mouse. */
+async function mouseClick(cdp, find, button = "left") {
+  const point = await cdp.evaluate(`(() => {
+    const box = (${find})?.getBoundingClientRect();
+    return box ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : null;
+  })()`);
+  if (!point) throw new Error(`nothing to click: ${find}`);
+  // Released with no button held, or the next press counts as a chord.
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button, buttons: button === "right" ? 2 : 1, clickCount: 1 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button, buttons: 0, clickCount: 1 });
+}
+
+/** Chooses an item of a tab's context menu (right click), as a user does. */
+async function chooseFromTabMenu(cdp, tab, label) {
+  const item = `[...document.querySelectorAll('[role="menuitem"]')].find((item) => item.textContent === ${JSON.stringify(label)})`;
+  await mouseClick(cdp, `document.getElementById(${JSON.stringify(tab.id)})`, "right");
+  await waitFor(`"${label}" in ${tab.name}'s menu`, 5_000, () => cdp.evaluate(`!!${item}`));
+  await mouseClick(cdp, item);
+  await waitFor("the tab menu to close", 5_000, async () => !(await cdp.evaluate(`!!${item}`)));
+}
+
+/**
+ * "+" asks for the new tab's service, WhatsApp first (Enter keeps opening a
+ * WhatsApp tab); Cancel adds nothing; Telegram adds a Telegram tab, saved as
+ * one and marked with its icon, which is then closed.
+ */
+async function checkNewTabChooser(cdp, profile, failures) {
+  const dialogOpen = () => cdp.evaluate('!!document.querySelector("[data-new-tab-dialog]")');
+  const webviews = () => cdp.evaluate('document.querySelectorAll("webview").length');
+  const savedTabs = () => readJson(path.join(profile, "tabs.json")).tabs;
+  try {
+    await cdp.evaluate('document.querySelector("[data-add-tab]").click()');
+    await waitFor("the new tab's service to be asked", 10_000, dialogOpen);
+    const focused = await waitFor("a service to have the focus", 5_000, () =>
+      cdp.evaluate("document.activeElement?.dataset.service ?? null")).catch(() => null);
+    if (focused !== "whatsapp") failures.push(`new tab: ${focused ?? "nothing"} has the focus instead of WhatsApp`);
+    await cdp.evaluate('document.querySelector("[data-new-tab-dialog] [data-cancel]").click()');
+    await waitFor("the dialog to close on Cancel", 5_000, async () => !(await dialogOpen()));
+    if ((await webviews()) !== TELEGRAM_TABS.length) failures.push("new tab: Cancel added a tab");
+
+    await cdp.evaluate('document.querySelector("[data-add-tab]").click()');
+    await waitFor("the new tab's service to be asked", 10_000, dialogOpen);
+    await cdp.evaluate('document.querySelector(\'[data-new-tab-dialog] [data-service="telegram"]\').click()');
+    const added = await waitFor("the new tab to be saved", 10_000, () =>
+      savedTabs().find((tab) => !TELEGRAM_TABS.some((known) => known.id === tab.id)));
+    if (added.service !== "telegram") failures.push(`new tab: saved with service ${added.service}`);
+    const shown = await waitFor("the new tab's webview", 10_000, () => cdp.evaluate(`(() => {
+      const webview = document.getElementById(${JSON.stringify(`webview-${added.id}`)});
+      return webview && {
+        src: webview.getAttribute("src"),
+        icon: !!document.getElementById(${JSON.stringify(added.id)})?.querySelector('[data-service-icon="telegram"]'),
+      };
+    })()`));
+    if (!SERVICE_PAGES.telegram.src.test(shown.src ?? "")) failures.push(`new tab: the Telegram tab loads ${shown.src}`);
+    if (!shown.icon) failures.push("new tab: the Telegram tab has no Telegram icon");
+    if (await cdp.evaluate(`!!document.getElementById(${JSON.stringify(ALFA.id)})?.querySelector("[data-service-icon]")`)) {
+      failures.push("Alfa, a WhatsApp tab, shows a service icon");
+    }
+    await cdp.evaluate(`document.querySelector(${JSON.stringify(`[data-close-tab="${added.id}"]`)}).click()`);
+    await waitFor("the new tab to close", 10_000, () => savedTabs().length === TELEGRAM_TABS.length);
+  } catch (error) {
+    failures.push(`new tab: ${error.message}`);
+  }
+}
+
+function exerciseTelegramTabs(profile) {
+  return async ({ cdp, port, failures, notes }) => {
+    let alfa;
+    let tango;
+    const server = http.createServer((request, response) => {
+      server.requests.push(request.url);
+      response.end("<title>Elsewhere</title>");
+    });
+    server.requests = [];
+    try {
+      alfa = await connectToTab(port, ALFA.id);
+      tango = await connectToTab(port, TANGO.id, "telegram");
+      await sleep(1000); // the account name and mute arrive with the tab ID
+
+      // Telegram's preload, in Telegram's tab only.
+      const hooks = await tango.evaluate(`({ badge: ${hooked("navigator.setAppBadge")}, open: ${hooked("window.open")} })`);
+      if (!hooks.badge || !hooks.open) failures.push(`Tango: Telegram's hooks are missing (${JSON.stringify(hooks)})`);
+      if (await alfa.evaluate(hooked("window.open"))) failures.push("Alfa: a WhatsApp tab has Telegram's window.open");
+
+      // A link the page opens on its own, without the user's click, goes
+      // nowhere (it would only show here where a browser opens it).
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+      await tango.evaluate(`window.open(${JSON.stringify(`http://127.0.0.1:${server.address().port}/opened`)}); true`);
+      await sleep(5000);
+      if (server.requests.length) failures.push("Tango: window.open without a click opened the link in the browser");
+
+      // Host-level trust: a permission check names only the origin.
+      const notified = await tango.evaluate(NOTIFY);
+      if (notified.permission !== "granted" || notified.requested !== "granted") {
+        failures.push(`Tango: notification permission is ${notified.permission}, request answered ${notified.requested}`);
+      }
+      if (!notified.real) failures.push("Tango: the notification was suppressed although Tango is not muted");
+      if (notified.title !== "Tango · Smoke") failures.push(`Tango: notification title is "${notified.title}", expected "Tango · Smoke"`);
+      if (notified.event === "error") failures.push("Tango: the notification reported an error");
+      notes.push(`telegram: Tango notification ${notified.event === "show" ? "shown" : `event: ${notified.event}`}`);
+
+      // The unread count is the page's app badge, on the page's own tab.
+      const badge = (tab) => cdp.evaluate(
+        `document.getElementById(${JSON.stringify(tab.id)})?.querySelector(".bg-red-600")?.textContent ?? ""`);
+      await tango.evaluate("navigator.setAppBadge(3)");
+      try {
+        await waitFor("Tango's count from its app badge", 5_000, async () => (await badge(TANGO)) === "3");
+      } catch {
+        failures.push(`Tango: setAppBadge(3) shows "${await badge(TANGO)}" on its tab`);
+      }
+      try {
+        await tango.evaluate(`document.body.dataset.tabId = ${JSON.stringify(ALFA.id)}; navigator.setAppBadge(4)`);
+        await waitFor("the count of Tango's page on Tango", 5_000, async () => (await badge(TANGO)) === "4");
+      } catch {
+        failures.push(`Tango's page claimed Alfa's tab ID: its count shows on Alfa "${await badge(ALFA)}", on Tango "${await badge(TANGO)}"`);
+      } finally {
+        await tango.evaluate(`document.body.dataset.tabId = ${JSON.stringify(TANGO.id)}`);
+      }
+      if ((await badge(ALFA)) !== "") failures.push(`Alfa shows Tango's count "${await badge(ALFA)}"`);
+      await tango.evaluate("navigator.clearAppBadge()");
+      await waitFor("Tango's count to clear", 5_000, async () => (await badge(TANGO)) === "").catch(() =>
+        failures.push("Tango: clearAppBadge() left a count on its tab"));
+
+      // The window cannot save a tab under another service, not even as the
+      // last closed tab; nothing of a refused write is saved.
+      const tabsFile = path.join(profile, "tabs.json");
+      const tabsBefore = fs.readFileSync(tabsFile, "utf8");
+      const save = (key, value) => cdp.evaluate(
+        `window.electronTabStore.set(${JSON.stringify(key)}, ${JSON.stringify(value)}).then(() => "saved", () => "refused")`);
+      for (const [what, key, value] of [
+        ["Tango without its service", "tabs", [ALFA, { ...TANGO, service: undefined }]],
+        ["Tango as a WhatsApp tab", "tabs", [ALFA, { ...TANGO, service: "whatsapp" }]],
+        ["Alfa as a Telegram tab", "tabs", [{ ...ALFA, service: "telegram" }, TANGO]],
+        ["Tango as a closed WhatsApp tab", "previouslyClosedTab", { ...TANGO, service: "whatsapp" }],
+      ]) {
+        if ((await save(key, value)) !== "refused") failures.push(`the window could save ${what}`);
+      }
+      if (fs.readFileSync(tabsFile, "utf8") !== tabsBefore) failures.push("a refused write changed tabs.json");
+
+      // Each tab stays on its service: Telegram on its K version.
+      await tango.evaluate('location.href = "https://web.telegram.org/a/"; true');
+      await sleep(3000);
+      const afterA = await cdp.evaluate(webviewCall(TANGO.id, "getURL"));
+      if (!afterA.startsWith(SERVICE_PAGES.telegram.prefix)) failures.push(`Tango left the K version for ${afterA}`);
+      const toWhatsApp = await followedRedirect(cdp, tango, TANGO.id, TELEGRAM_REDIRECT_START, "https://web.whatsapp.com/", SERVICE_PAGES.telegram.prefix);
+      if (toWhatsApp) failures.push(`Tango: ${toWhatsApp}`);
+      const toTelegram = await followedRedirect(cdp, alfa, ALFA.id, REDIRECT_START, "https://web.telegram.org/k/", SERVICE_PAGES.whatsapp.prefix);
+      if (toTelegram) failures.push(`Alfa: ${toTelegram}`);
+
+      // Muted from its tab's menu: no notification until unmuted.
+      await chooseFromTabMenu(cdp, TANGO, EN["Mute notifications for 1 hour"]);
+      await waitFor("Tango to show it is muted", 5_000, () => cdp.evaluate(
+        `!!document.getElementById(${JSON.stringify(TANGO.id)})?.querySelector(${JSON.stringify(`[aria-label="${EN["Notifications muted"]}"]`)})`));
+      await sleep(1000); // the mute reaches the page
+      const muted = await tango.evaluate(NOTIFY);
+      if (muted.real) failures.push("Tango: muted, but a real notification was created");
+      if (muted.event !== "close") failures.push(`Tango: the stand-in did not report itself closed (${muted.event})`);
+      await chooseFromTabMenu(cdp, TANGO, EN["Unmute notifications"]);
+
+      await checkNewTabChooser(cdp, profile, failures);
+    } catch (error) {
+      failures.push(error.message);
+    } finally {
+      alfa?.close();
+      tango?.close();
+      server.close();
+    }
+  };
+}
+
+async function checkTelegramTabs() {
+  const profile = fs.mkdtempSync(path.join(TEMP, "as-p-"));
+  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({ tabClosePrompt: { value: false } }));
+  fs.writeFileSync(path.join(profile, "tabs.json"), JSON.stringify({
+    tabs: TELEGRAM_TABS, previouslyClosedTab: null, selectedTabId: ALFA.id,
+  }));
+  const result = await checkRunningApp("telegram-tabs", PACKAGED_EXE, [`--user-data-dir=${profile}`], {
+    label: ADD_TAB_LABEL.en,
+    otherLabel: ADD_TAB_LABEL.it,
+    tabNames: TELEGRAM_TABS.map((tab) => tab.name),
+    tabIds: TELEGRAM_TABS.map((tab) => tab.id),
+    tabCount: TELEGRAM_TABS.length,
+    services: { [TANGO.id]: "telegram" },
+    windowShown: true,
+    afterLoad: exerciseTelegramTabs(profile),
+  }, 9420);
+  removeTemp(profile);
+  return result;
+}
+
 async function checkBackgroundTabs() {
   const profile = fs.mkdtempSync(path.join(TEMP, "as-p-"));
   const seed = (settings) => {
@@ -1426,12 +1684,14 @@ async function checkBackgroundTabs() {
     afterLoad: exerciseBackgroundTabs("in the tray", audio, profile),
   }, 9416);
   removeTemp(profile);
+  const telegram = await checkTelegramTabs();
   return {
     failures: [
       ...shown.failures.map((line) => `window shown: ${line}`),
       ...inTray.failures.map((line) => `in the tray: ${line}`),
+      ...telegram.failures.map((line) => `telegram: ${line}`),
     ],
-    notes: [...shown.notes, ...inTray.notes],
+    notes: [...shown.notes, ...inTray.notes, ...telegram.notes],
   };
 }
 
@@ -2195,8 +2455,8 @@ const checks = [
   ["1. Fuses; app.asar has the bundles, page, icons and translations", checkFuses],
   ["2. Modified app.asar is refused", checkTamperedAsar],
   ["3. Fresh profile: window, tab, WhatsApp Web, no errors, redirect off WhatsApp cancelled; started by a whatsapp:// link, on screen though remembered off it", checkFreshProfile],
-  ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account; unreadable saved files are set aside and the accounts come back", checkStartInTray],
-  ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, counts and clicks tied to their tab, invalid tab and theme lists refused, moving tabs, Resource Usage, link asks for the account", checkBackgroundTabs],
+  ["4. Start in tray with Windows: hidden but connected; opens when started by hand; a lost tab list deletes no account; unreadable saved files are set aside and the accounts come back, a Telegram one as Telegram", checkStartInTray],
+  ["5. Three accounts: background sound and notifications, muted account, permissions follow the tab's switches, counts and clicks tied to their tab, invalid tab and theme lists refused, moving tabs, Resource Usage, link asks for the account; a Telegram account next to a WhatsApp one", checkBackgroundTabs],
   ["6. Resource test: title bar kept until restart, window listeners, menu without focus, restart into it, record three accounts, download during the test, summary, normal restart", checkResourceTest],
 ];
 if (runInstaller) {
