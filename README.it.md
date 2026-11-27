@@ -18,7 +18,7 @@
 
 Altus + è un fork mantenuto di [**Altus**](https://github.com/amanharwara/altus) di [Aman Harwara](https://github.com/amanharwara): un'app Electron che racchiude WhatsApp Web, con una scheda per ogni account.
 
-Il progetto originale non riceve più aggiornamenti. Altus + lo mantiene su una versione recente di Electron e aggiunge ciò che serve per usare ogni giorno più account. Le priorità sono **prima la sicurezza, poi la stabilità, poi il consumo di risorse**.
+Altus + funziona solo su Windows; su macOS o Linux usa l'originale. Si aggiorna da sé, aggiunge ciò che serve per usare ogni giorno più account e mette **prima la sicurezza, poi la stabilità, poi il consumo di risorse**.
 
 ## In breve
 
@@ -37,7 +37,7 @@ Il progetto originale non riceve più aggiornamenti. Altus + lo mantiene su una 
 | 🩹 **Ripristino dai crash** | Un account che si blocca o va in crash si ricarica da solo, senza toccare gli altri. |
 | ⬆️ **Aggiornamenti integrati** | Altus + cerca nuove versioni all'avvio e ogni 6 ore mentre resta aperto. Si scaricano in background, vengono verificate (SHA512) e si installano con un clic. Durante l'installazione resta visibile un avviso. |
 | 🌐 **English / Italiano** | Impostazioni → Lingua, con effetto immediato. |
-| 🛡️ **Più sicura** | Electron aggiornato (44), pacchetto dell'app protetto da manomissioni, eseguibile e finestra blindati. [Dettagli](#sicurezza). |
+| 🛡️ **Più sicura** | Electron supportato (44), pacchetto dell'app protetto da manomissioni, eseguibile e finestra blindati. [Dettagli](#sicurezza). |
 
 ## Download
 
