@@ -42,6 +42,10 @@ const config: ForgeConfig = {
           entry: "src/whatsapp.preload.ts",
           config: "vite.whatsapp.preload.config.ts",
         },
+        {
+          entry: "src/telegram.preload.ts",
+          config: "vite.telegram.preload.config.ts",
+        },
       ],
       renderer: [
         {

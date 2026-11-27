@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TAB_ID } from "./partitions";
 import type { Tab } from "../stores/tabs/common";
 import { SettingsSchema, type SettingKey } from "../stores/settings/common";
+import { serviceOfTab, type ServiceId } from "./services";
 
 /**
  * What the window may save in tabs.json and themes.json ("tab-store-set" and
@@ -10,7 +11,9 @@ import { SettingsSchema, type SettingKey } from "../stores/settings/common";
  * that is refused is not saved at all, so tabs and themes saved by earlier
  * versions or by the original Altus must still pass. Their fields may be
  * missing (no Microphone and Camera switch) or unknown here (messageCount),
- * and unknown fields are kept.
+ * and unknown fields are kept. A tab's service is not checked here either: one
+ * this version does not know reads as WhatsApp (serviceOfTab), and a change of
+ * service is refused by TabServiceRecord.
  */
 
 const text = (max: number) => z.string().max(max);
@@ -75,6 +78,32 @@ export function isValidThemeStoreValue(key: unknown, value: unknown): boolean {
 export function isValidSettingUpdate(key: unknown, value: unknown): key is SettingKey {
   if (typeof key !== "string" || !Object.prototype.hasOwnProperty.call(SettingsSchema.shape, key)) return false;
   return value === undefined || SettingsSchema.shape[key as SettingKey].safeParse({ value }).success;
+}
+
+/**
+ * The service of every tab the saved lists named in this run (the tab list and
+ * the last closed tab). A tab's session holds its service's account, so the
+ * window may not save the tab under another service ("tab-store-set"), not
+ * even by closing it and bringing it back as another.
+ */
+export class TabServiceRecord {
+  private readonly services = new Map<string, ServiceId>();
+
+  /** Whether one of these tabs was recorded with another service. */
+  changesService(tabs: unknown): boolean {
+    return usableTabs(tabs).some((tab) => {
+      const recorded = this.services.get(tab.id.toLowerCase());
+      return recorded !== undefined && recorded !== serviceOfTab(tab);
+    });
+  }
+
+  /** Records the service of these tabs; a tab keeps the first one recorded. */
+  record(tabs: unknown): void {
+    for (const tab of usableTabs(tabs)) {
+      const id = tab.id.toLowerCase();
+      if (!this.services.has(id)) this.services.set(id, serviceOfTab(tab));
+    }
+  }
 }
 
 /**

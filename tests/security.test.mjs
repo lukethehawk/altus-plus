@@ -57,6 +57,11 @@ test("persistent partition IDs", () => {
 test("messages from a tab's own page", () => {
   const sender = (type, url) => ({ getType: () => type, getURL: () => url });
   assert.equal(isServicePage(sender("webview", "https://web.whatsapp.com/"), "whatsapp"), true);
+  assert.equal(isServicePage(sender("webview", "https://web.telegram.org/k/#@telegram"), "telegram"), true);
+  // A page of another service, or of the service's site outside its tabs' part.
+  assert.equal(isServicePage(sender("webview", "https://web.whatsapp.com/"), "telegram"), false);
+  assert.equal(isServicePage(sender("webview", "https://web.telegram.org/k/"), "whatsapp"), false);
+  assert.equal(isServicePage(sender("webview", "https://web.telegram.org/a/"), "telegram"), false);
   // A session that is no tab's has no service: even a WhatsApp page in it.
   assert.equal(isServicePage(sender("webview", "https://web.whatsapp.com/"), undefined), false);
   for (const [type, url] of [
@@ -88,7 +93,11 @@ test("invoke handlers answer only the app window", () => {
 test("the window attaches only tabs of a service, in their own partition", () => {
   assert.equal(webviewService("https://web.whatsapp.com/", "persist:smokeAlfaTab000000001"), "whatsapp");
   assert.equal(webviewService("https://web.whatsapp.com", "persist:smokeAlfaTab000000001"), "whatsapp");
+  assert.equal(webviewService("https://web.telegram.org/k/", "persist:smokeTelegram00000001"), "telegram");
   for (const [src, partition] of [
+    ["https://web.telegram.org/a/", "persist:smokeTelegram00000001"],
+    ["https://web.telegram.org/", "persist:smokeTelegram00000001"],
+    ["https://web.telegram.org/k/", "persist:../smokeEscape"],
     ["https://example.org/", "persist:smokeAlfaTab000000001"],
     ["http://web.whatsapp.com/", "persist:smokeAlfaTab000000001"],
     ["https://web.whatsapp.com/", "persist:../smokeEscape"],

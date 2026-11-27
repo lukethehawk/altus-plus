@@ -19,7 +19,7 @@ register(
       }`)
 );
 
-const { isValidSettingUpdate, isValidTabStoreValue, isValidThemeStoreValue, usableTabs } = await import(
+const { TabServiceRecord, isValidSettingUpdate, isValidTabStoreValue, isValidThemeStoreValue, usableTabs } = await import(
   "../src/utils/storeValidation.ts"
 );
 const { ThemeStoreDefaults } = await import("../src/stores/themes/common.ts");
@@ -50,6 +50,40 @@ test("tabs saved by earlier versions and by the original Altus are accepted", ()
   assert.equal(tabsOk([{ ...alfa, messageCount: undefined }]), true);
   assert.equal(tabsOk([{ id: alfa.id, name: "Alfa" }]), true);
   assert.equal(tabsOk([{ ...alfa, config: { ...config, theme: undefined, color: undefined } }]), true);
+});
+
+test("a tab's service never makes a list refused", () => {
+  assert.equal(tabsOk([alfa, { ...beta, service: "telegram" }]), true);
+  // A later version's service, or nonsense: read as WhatsApp, still saved.
+  for (const service of ["signal", "", 5, null, { telegram: true }, "x".repeat(1000)]) {
+    assert.equal(tabsOk([alfa, { ...beta, service }]), true, JSON.stringify(service));
+  }
+  assert.equal(isValidTabStoreValue("previouslyClosedTab", { ...beta, service: "telegram" }), true);
+});
+
+test("the window cannot save a tab under another service", () => {
+  const telegram = { ...beta, service: "telegram" };
+  const record = new TabServiceRecord();
+  record.record([alfa, telegram]);
+  record.record([null]);
+  assert.equal(record.changesService([alfa, telegram]), false);
+  assert.equal(record.changesService([telegram, alfa, muted]), false); // moved, and a new tab
+  assert.equal(record.changesService([alfa, { ...muted, service: "telegram" }]), false); // a new Telegram tab
+  assert.equal(record.changesService([alfa, { ...telegram, service: undefined }]), true);
+  assert.equal(record.changesService([alfa, { ...telegram, service: "whatsapp" }]), true);
+  assert.equal(record.changesService([{ ...alfa, service: "telegram" }, telegram]), true);
+  // Chromium lower-cases the folder: the same account in another case.
+  assert.equal(record.changesService([{ ...telegram, id: telegram.id.toUpperCase(), service: undefined }]), true);
+  // A service this version does not know reads as WhatsApp: no change for Alfa.
+  assert.equal(record.changesService([{ ...alfa, service: "signal" }]), false);
+  // Closed, then brought back as another service: still refused.
+  record.record([]);
+  assert.equal(record.changesService([{ ...telegram, service: "whatsapp" }]), true);
+  // A tab keeps the first service recorded.
+  record.record([{ ...telegram, service: "whatsapp" }]);
+  assert.equal(record.changesService([telegram]), false);
+  assert.equal(record.changesService("smoke"), false);
+  assert.equal(record.changesService([null]), false);
 });
 
 test("tab IDs that could not name a partition folder are refused", () => {

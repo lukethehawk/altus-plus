@@ -88,11 +88,11 @@ export class ResourceTestRecorder {
     this.record({ type: "window-shown", seconds: this.seconds() }, "window shown");
   }
 
-  /** The first unread count from a tab: its WhatsApp page has loaded. */
-  accountLoaded(tabId: string, name: string) {
+  /** The first unread count from a tab: its page ("WhatsApp", "Telegram") has loaded. */
+  accountLoaded(tabId: string, name: string, service: string) {
     if (this.loadedTabs.has(tabId)) return;
     this.loadedTabs.add(tabId);
-    this.record({ type: "account-loaded", seconds: this.seconds(), tabId, name }, `WhatsApp page loaded: ${name}`);
+    this.record({ type: "account-loaded", seconds: this.seconds(), tabId, name }, `${service} page loaded: ${name}`);
   }
 
   /** Stops sampling and writes the summary; later calls return the same files. */
