@@ -4,7 +4,7 @@
 
 # Altus +
 
-**Several WhatsApp accounts in one desktop app, kept up to date.**
+**Several WhatsApp accounts, and Telegram ones too, in one desktop app, kept up to date.**
 
 [![Latest release](https://img.shields.io/github/v/release/lukethehawk/altus-plus?label=release)](https://github.com/lukethehawk/altus-plus/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6)](https://github.com/lukethehawk/altus-plus/releases/latest)
@@ -24,7 +24,8 @@ Altus + runs on Windows only; on macOS or Linux, use the original. It updates it
 
 | | |
 |---|---|
-| 👥 **Multiple accounts** | One tab per WhatsApp account, each in its own isolated session. To reorder them, turn on Tab → *Allow Moving Tabs* and drag a tab onto another. |
+| 👥 **Multiple accounts** | One tab per account, each in its own isolated session. To reorder them, turn on Tab → *Allow Moving Tabs* and drag a tab onto another. |
+| ✈️ **Telegram tabs** | Ctrl+T and **+** ask which service the new tab opens: WhatsApp (already selected: just press Enter) or Telegram Web. A tab keeps its service. Telegram tabs get the same per-account notifications, mute, unread counts and download notice; themes, the formatting shortcuts, the Enter keys and whatsapp:// links stay WhatsApp's. |
 | 🔔 **Clear notifications** | Notification titles show the account (`Work · Mario Rossi`). A click opens the right tab and chat. |
 | 🔕 **Per-account mute** | Right-click a tab to mute it for 1 hour, 8 hours or until you turn it back on. Other accounts keep notifying. |
 | 📥 **Unread at a glance** | Hover over the tray icon to see each account's unread chats, and which accounts are muted. |
@@ -82,14 +83,14 @@ Updates and reinstalls never ask again. For unattended installs, `Altus-Plus-Set
 
 ## Privacy
 
-Altus + loads WhatsApp Web and nothing else in its tabs. Its only other connection is to GitHub, to check for updates, and you can switch that off. There is no telemetry.
+Altus + loads WhatsApp Web, and Telegram Web in the tabs you open for it, and nothing else in its tabs. Its only other connection is to GitHub, to check for updates, and you can switch that off. There is no telemetry.
 
 ## Security
 
 | Area | What Altus + does |
 |---|---|
 | **Accounts** | Each account runs in its own sandboxed, isolated session; one account cannot see another's data. |
-| **Web content** | Tabs can only stay on WhatsApp Web. Other links open in your browser, pop-ups are blocked, and the app's internal messages are checked against the window or tab that sent them. |
+| **Web content** | Each tab stays on its own service: WhatsApp Web, or Telegram Web (its K version). A tab's service is set when it is created and never changes; what the tab may do is checked against it. Other links open in your browser, pop-ups are blocked, and the app's internal messages are checked against the window or tab that sent them. |
 | **App window** | A Content-Security-Policy lets the window run only Altus +'s own code. |
 | **Executable** | Electron fuses turn off `RunAsNode`, `NODE_OPTIONS` and `--inspect`, so other programs cannot use the Altus + executable to run their own code. |
 | **Integrity** | At startup the app checks its own package (`app.asar`) and refuses to start if it has been modified. |
@@ -133,7 +134,7 @@ Altus + exists thanks to [**Altus**](https://github.com/amanharwara/altus) by **
 
 Built with [Electron](https://www.electronjs.org/), [SolidJS](https://www.solidjs.com/), [Kobalte](https://kobalte.dev/), [electron-store](https://github.com/sindresorhus/electron-store) and [electron-updater](https://www.electron.build/auto-update). The dark theme is based on [vednoc/dark-whatsapp](https://github.com/vednoc/dark-whatsapp).
 
-Altus + is not affiliated with WhatsApp or Meta.
+Altus + is not affiliated with WhatsApp, Meta or Telegram.
 
 ## License
 
