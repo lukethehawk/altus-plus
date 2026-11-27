@@ -54,7 +54,7 @@ export type ProcessOwners = {
    */
   pagePids?: number[];
   /**
-   * Renderers that run only WhatsApp's service workers (one per account), as
+   * Renderers that run only the accounts' service workers (one per account), as
    * Electron lists them. Electron does not give their system PIDs, and while a
    * worker starts or is replaced there can be one renderer more or less.
    */
@@ -73,7 +73,7 @@ function kindOf(process: ProcessUsage, owners: ProcessOwners): ResourceKind {
     case "Tab":
       if (process.pid === owners.windowPid) return "window";
       if (owners.pagePids?.includes(process.pid)) return "other";
-      // No page: a renderer for WhatsApp's service workers, also while one
+      // No page: a renderer for the accounts' service workers, also while one
       // of them starts or stops and the counts briefly differ.
       return owners.workerProcesses ? "workers" : "other";
     case "Utility":

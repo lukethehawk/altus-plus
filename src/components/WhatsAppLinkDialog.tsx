@@ -4,6 +4,7 @@ import CloseIcon from "../icons/CloseIcon";
 import { I18NContext } from "../i18n/solid";
 import { tabStore } from "../stores/tabs/solid";
 import { describeWhatsAppWebAddress } from "../utils/whatsappLinks";
+import { serviceOfTab } from "../utils/services";
 
 const buttonClass =
   "text-sm text-left py-1.5 px-2.5 bg-zinc-700/50 border rounded border-zinc-600 outline-none focus:border-zinc-300 select-none hover:bg-zinc-700 focus:bg-zinc-700 active:bg-zinc-700/75";
@@ -11,7 +12,7 @@ const buttonClass =
 /**
  * Asks which account opens a whatsapp:// link, so that a chat is never
  * started from the wrong number. The selected account has the focus: Enter
- * opens the link there.
+ * opens the link there. Only WhatsApp tabs are offered.
  */
 const WhatsAppLinkDialog = (props: {
   address: string;
@@ -19,6 +20,10 @@ const WhatsAppLinkDialog = (props: {
   close: () => void;
 }) => {
   const { t } = useContext(I18NContext);
+  const whatsAppTabs = () => tabStore.tabs.filter((tab) => serviceOfTab(tab) === "whatsapp");
+  // The selected tab, or the first WhatsApp tab when a tab of another service is selected.
+  const focusedTabId = () =>
+    whatsAppTabs().find((tab) => tab.id === tabStore.selectedTabId)?.id ?? whatsAppTabs()[0]?.id;
 
   const summary = () => {
     const target = describeWhatsAppWebAddress(props.address);
@@ -56,7 +61,7 @@ const WhatsAppLinkDialog = (props: {
             <div class="mt-2">{t("Which account should open it?")}</div>
           </Dialog.Description>
           <div class="flex flex-col gap-1.5">
-            <For each={tabStore.tabs}>
+            <For each={whatsAppTabs()}>
               {(tab) => (
                 <button
                   type="button"
@@ -64,7 +69,7 @@ const WhatsAppLinkDialog = (props: {
                   data-tab-id={tab.id}
                   aria-current={tab.id === tabStore.selectedTabId ? "true" : undefined}
                   ref={(element) => {
-                    if (tab.id === tabStore.selectedTabId) {
+                    if (tab.id === focusedTabId()) {
                       setTimeout(() => element.focus(), 5);
                     }
                   }}

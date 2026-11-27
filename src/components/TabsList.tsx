@@ -24,6 +24,7 @@ import { Tab, getDefaultTab } from "../stores/tabs/common";
 import CloseIcon from "../icons/CloseIcon";
 import SettingsIcon from "../icons/SettingsIcon";
 import BellOffIcon from "../icons/BellOffIcon";
+import PaperPlaneIcon from "../icons/PaperPlaneIcon";
 import { I18NContext } from "../i18n/solid";
 import {
   HOUR_MS,
@@ -34,9 +35,11 @@ import TabEditDialog from "./TabEditDialog";
 import { twJoin } from "tailwind-merge";
 import { getSettingValue } from "../stores/settings/solid";
 import NewChatDialog from "./NewChatDialog";
+import NewTabDialog from "./NewTabDialog";
 import WhatsAppLinkDialog from "./WhatsAppLinkDialog";
 import { describeWhatsAppWebAddress } from "../utils/whatsappLinks";
 import type { WebviewTag } from "electron";
+import { serviceOfTab, type ServiceId } from "../utils/services";
 
 interface TabComponentProps {
   tab: Tab;
@@ -171,6 +174,14 @@ const TabComponent: Component<TabComponentProps> = (props) => {
               aria-label={t("Notifications muted")}
             />
           </Show>
+          <Show when={serviceOfTab(props.tab) === "telegram"}>
+            <PaperPlaneIcon
+              class="w-3.5 h-3.5 opacity-80"
+              role="img"
+              aria-label="Telegram"
+              data-service-icon="telegram"
+            />
+          </Show>
           <span>{props.tab.name}</span>
           <button
             class="flex items-center justify-center ml-0.5 w-6 h-6 hover:bg-zinc-800/50 rounded group-data-[selected]:hover:bg-zinc-800/50"
@@ -246,6 +257,7 @@ const TabsList: Component = () => {
   const canShowTabEditDialog = () => tabToEdit() !== null;
 
   const [canShowNewChatDialog, setShowNewChatDialog] = createSignal(false);
+  const [canShowNewTabDialog, setShowNewTabDialog] = createSignal(false);
 
   // A whatsapp:// link (as a WhatsApp Web address) waiting for an account.
   const [linkToOpen, setLinkToOpen] = createSignal<string | null>(null);
@@ -257,17 +269,27 @@ const TabsList: Component = () => {
     webview.dataset.openedLink = address;
     webview.src = address;
   };
+  // Only a WhatsApp tab can open it.
   const receiveWhatsAppLink = (address: string | null) => {
     if (!address || !describeWhatsAppWebAddress(address)) return;
-    if (tabStore.tabs.length === 1) {
-      openLinkInTab(tabStore.tabs[0].id, address);
-    } else if (tabStore.tabs.length > 1) {
+    const whatsAppTabs = tabStore.tabs.filter((tab) => serviceOfTab(tab) === "whatsapp");
+    if (whatsAppTabs.length === 1) {
+      openLinkInTab(whatsAppTabs[0].id, address);
+    } else if (whatsAppTabs.length > 1) {
       setLinkToOpen(address);
+    } else if (tabStore.tabs.length > 0) {
+      void window.showMessageBox({
+        type: "info",
+        buttons: ["OK"],
+        title: t("Open WhatsApp link"),
+        message: t("No tab shows WhatsApp: add a WhatsApp tab to open the link."),
+      });
     }
   };
 
+  // Asks for the service first (NewTabDialog).
   const addNewTab = () => {
-    addTab(getDefaultTab());
+    setShowNewTabDialog(true);
   };
 
   const removeTabWithPrompt = async (tab: Tab) => {
@@ -454,6 +476,7 @@ const TabsList: Component = () => {
         </div>
         <button
           class="group flex items-center gap-2.5 bg-zinc-800 px-3 py-2 text-white text-sm leading-4 ui-selected:bg-zinc-700 hover:bg-zinc-600 select-none"
+          data-add-tab
           onClick={addNewTab}
         >
           <div class="sr-only">{t("Add New Tab")}</div>
@@ -483,6 +506,17 @@ const TabsList: Component = () => {
             close={() => {
               setShowNewChatDialog(false);
             }}
+          />
+        </Show>
+      </Dialog.Root>
+      <Dialog.Root open={canShowNewTabDialog()} onOpenChange={setShowNewTabDialog}>
+        <Show when={canShowNewTabDialog()}>
+          <NewTabDialog
+            add={(service: ServiceId) => {
+              setShowNewTabDialog(false);
+              addTab(getDefaultTab(service));
+            }}
+            close={() => setShowNewTabDialog(false)}
           />
         </Show>
       </Dialog.Root>

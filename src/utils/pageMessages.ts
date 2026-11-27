@@ -1,6 +1,7 @@
 /**
- * What a WhatsApp tab's page reports to main (src/whatsapp.preload.ts). The
- * page can be made to send anything, so main takes only plausible values.
+ * What a tab's page reports to main (its service's preload, as
+ * src/whatsapp.preload.ts). The page can be made to send anything, so main
+ * takes only plausible values.
  */
 
 /** More unread chats than any account has: a count above it is refused. */

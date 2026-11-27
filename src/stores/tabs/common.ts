@@ -1,8 +1,14 @@
 import { nanoid } from "nanoid";
+import { DEFAULT_SERVICE, type ServiceId } from "../../utils/services";
 
 export type Tab = {
   id: string;
   name: string;
+  /**
+   * Chosen when the tab is created, never changed: read it with serviceOfTab
+   * (none, as in the tabs of earlier versions, is WhatsApp).
+   */
+  service?: ServiceId;
   messageCount?: number;
   config: {
     theme: string;
@@ -22,9 +28,11 @@ export type TabStore = {
   selectedTabId: string | undefined;
 };
 
-export const getDefaultTab = (): Tab => ({
+/** A new tab of the service; a WhatsApp tab is saved without one, as before services. */
+export const getDefaultTab = (service: ServiceId = DEFAULT_SERVICE): Tab => ({
   id: nanoid(),
   name: "New Tab",
+  ...(service === DEFAULT_SERVICE ? {} : { service }),
   messageCount: 0,
   config: {
     theme: "dark",

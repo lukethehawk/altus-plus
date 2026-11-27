@@ -9,10 +9,13 @@ import { type Tab } from "../stores/tabs/common";
 import { WebviewTag } from "electron";
 import { themeStore } from "../stores/themes/solid";
 import { unwrap } from "solid-js/store";
+import { SERVICES, serviceOfTab } from "../utils/services";
 
 const WebView: Component<{ tab: Tab }> = (props) => {
   let webviewRef: WebviewTag | undefined;
   const [didStopLoading, setDidStopLoading] = createSignal(false);
+  // Fixed for the tab's life: main refuses a tab that changes service.
+  const service = serviceOfTab(props.tab);
 
   const selectedTheme = createMemo(() => {
     return unwrap(
@@ -20,9 +23,11 @@ const WebView: Component<{ tab: Tab }> = (props) => {
     );
   });
 
+  // Themes are WhatsApp's: Telegram has its own.
   createEffect(() => {
     if (!webviewRef) return;
     if (!didStopLoading()) return;
+    if (service !== "whatsapp") return;
 
     webviewRef.send("set-theme", selectedTheme());
   });
@@ -35,7 +40,7 @@ const WebView: Component<{ tab: Tab }> = (props) => {
   });
 
   // Notifications and the microphone and camera follow the tab's switches
-  // in the main process (setUpTabPermissions), from before the page loads.
+  // in the main process (setUpTabSession), from before the page loads.
 
   createEffect(() => {
     if (!webviewRef) return;
@@ -86,7 +91,7 @@ const WebView: Component<{ tab: Tab }> = (props) => {
       ref={webviewRef}
       class="w-full h-full"
       id={`webview-${props.tab.id}`}
-      src="https://web.whatsapp.com"
+      src={SERVICES[service].start}
       partition={`persist:${props.tab.id}`}
       webpreferences={`spellcheck=${props.tab.config.spellChecker}`}
     />

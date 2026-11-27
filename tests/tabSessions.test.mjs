@@ -66,7 +66,7 @@ test("a tab's session keeps the service it was opened with", () => {
   assert.equal(sessions.register(session, "persist:smokeAlfaTab000000001", "whatsapp"), true);
   // Another service, or another tab, in the same session is refused and
   // changes nothing.
-  assert.equal(sessions.register(session, "persist:smokeAlfaTab000000001", "smoke-other-service"), false);
+  assert.equal(sessions.register(session, "persist:smokeAlfaTab000000001", "telegram"), false);
   assert.equal(sessions.register(session, "persist:smokeBetaTab000000002", "whatsapp"), false);
   assert.equal(sessions.serviceOf(session), "whatsapp");
   assert.equal(sessions.tabOf(session), "smokeAlfaTab000000001");
@@ -78,4 +78,13 @@ test("a session no tab was opened in has no service", () => {
   assert.equal(sessions.serviceOf({}), undefined);
   assert.equal(sessions.serviceOf(undefined), undefined);
   assert.equal(sessions.serviceOf(null), undefined);
+});
+
+test("a Telegram tab's session takes no WhatsApp page", () => {
+  const sessions = new TabSessions();
+  const session = {};
+  assert.equal(sessions.register(session, "persist:smokeTelegram00000001", "telegram"), true);
+  assert.equal(sessions.serviceOf(session), "telegram");
+  assert.equal(sessions.register(session, "persist:smokeTelegram00000001", "whatsapp"), false);
+  assert.equal(sessions.serviceOf(session), "telegram");
 });

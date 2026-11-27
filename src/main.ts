@@ -22,6 +22,7 @@ import { Tab, TabStore } from "./stores/tabs/common";
 import { electronThemeStore } from "./stores/themes/electron";
 import { ThemeStore } from "./stores/themes/common";
 import {
+  TabServiceRecord,
   isValidSettingUpdate,
   isValidTabStoreValue,
   isValidThemeStoreValue,
@@ -101,7 +102,7 @@ import {
   onlyFromSender,
   webviewService,
 } from "./utils/security";
-import { isServiceURL, type ServiceId } from "./utils/services";
+import { SERVICE_NAMES, isServiceOrigin, isServiceURL, serviceOfTab, type ServiceId } from "./utils/services";
 import { nextZoomFactor, reportedUnreadCount } from "./utils/pageMessages";
 import { TabSessions } from "./utils/tabSessions";
 import { allowPermissionCheck, allowPermissionRequest } from "./utils/permissions";
@@ -144,7 +145,7 @@ function getSettingWithDefault<Key extends SettingKey>(
 let tray: Tray | undefined;
 let trayTooltip = "";
 
-// Unread chats per account, as counted in each WhatsApp page title.
+// Unread chats per account, as each tab's page reports them.
 const unreadByTab = new Map<string, number>();
 
 /** The saved tabs: a list, and only tabs whose ID can name a partition. */
@@ -558,13 +559,18 @@ function createWindow() {
   // Every <webview> must be a tab that starts on a page of a service, in its
   // own persistent partition, running that service's preload without Node
   // access, whatever the renderer asked for. A partition keeps the service it
-  // first showed.
+  // first showed, and a saved tab the service it was saved with.
   mainWindow.webContents.on(
     "will-attach-webview",
     (event, webPreferences, params) => {
       const service = webviewService(params.src, params.partition);
+      const savedTab = savedTabs().find((tab) => `persist:${tab.id}` === params.partition);
       // Before the page loads, not once it has (the window used to ask).
-      if (!service || !setUpTabSession(params.partition, service)) {
+      if (
+        !service ||
+        (savedTab && serviceOfTab(savedTab) !== service) ||
+        !setUpTabSession(params.partition, service)
+      ) {
         event.preventDefault();
         return;
       }
@@ -758,10 +764,14 @@ if (!singleInstanceLock) {
       // handled by the preload through the validated "open-link" channel.
       webContents.setWindowOpenHandler(() => ({ action: "deny" }));
       // Keep each tab on its service; open other http(s) pages in the
-      // default browser instead of inside the account's session.
+      // default browser instead of inside the account's session. A page of
+      // the service's own site that its tabs do not show (Telegram's A
+      // version) is only cancelled.
       webContents.on("will-navigate", (event, url) => {
         if (isTabServiceURL(webContents, url)) return;
         event.preventDefault();
+        const service = tabSessions.serviceOf(webContents.session);
+        if (service && isServiceOrigin(service, url)) return;
         const externalURL = getSafeExternalHttpURL(url);
         if (!externalURL) return;
         void shell
@@ -993,6 +1003,7 @@ function toggleTray(mainWindow: BrowserWindow, enabled: boolean) {
 /** The preload each service's tabs run, next to the main bundle. */
 const SERVICE_PRELOADS: Record<ServiceId, string> = {
   whatsapp: "whatsapp.preload.cjs",
+  telegram: "telegram.preload.cjs",
 };
 
 /** Partitions whose permission handlers are set (once per session). */
@@ -1021,14 +1032,15 @@ function setUpTabSession(partition: string, service: ServiceId): boolean {
   if (partitionsWithPermissionHandlers.has(partition)) return true;
   partitionsWithPermissionHandlers.add(partition);
   const switchesOf = () => savedTabs().find((tab) => `persist:${tab.id}` === partition)?.config;
+  // By host: a permission check names only the origin asking.
   tabSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     // The frame asking, so that a page embedded in the service's page gets
     // nothing.
-    const fromService = isServiceURL(service, details.requestingUrl || contents.getURL());
+    const fromService = isServiceOrigin(service, details.requestingUrl || contents.getURL());
     callback(allowPermissionRequest(permission, fromService, switchesOf()));
   });
   tabSession.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
-    const fromService = isServiceURL(service, requestingOrigin || contents?.getURL() || "");
+    const fromService = isServiceOrigin(service, requestingOrigin || contents?.getURL() || "");
     return allowPermissionCheck(permission, fromService, switchesOf());
   });
   return true;
@@ -1101,12 +1113,20 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     return electronTabStore.store;
   });
 
+  // The services of the saved tabs, which the window may not change.
+  const tabServices = new TabServiceRecord();
+  tabServices.record(electronTabStore.get("tabs"));
+  tabServices.record([electronTabStore.get("previouslyClosedTab")]);
+
   handle(
     "tab-store-set",
     (_event, key: keyof TabStore, value: unknown) => {
       // A known key with a valid value. Nothing of a refused update is
       // saved: no tab list, no closed tab.
       if (!isValidTabStoreValue(key, value)) throw new Error("Invalid tab store update");
+      const tabs = key === "tabs" ? value : key === "previouslyClosedTab" ? [value] : [];
+      if (tabServices.changesService(tabs)) throw new Error("A tab cannot change service");
+      tabServices.record(tabs);
       if (key === "tabs" && value !== undefined) recordClosedTab(value);
       if (value === undefined) electronTabStore.delete(key);
       else electronTabStore.set(key, value);
@@ -1209,7 +1229,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
   });
 
   // A notification of some account was clicked: show the window on that
-  // account's tab. WhatsApp's own click handler then opens the chat.
+  // account's tab. The page's own click handler then opens the chat.
   ipcMain.on("notification-clicked", (event) => {
     const { sender } = event;
     if (!fromTabPage(sender)) return;
@@ -1244,7 +1264,8 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
       if (!activeIds.has(id)) unreadByTab.delete(id);
     }
     unreadByTab.set(tabId, messageCount);
-    resourceTest?.accountLoaded(tabId, tabs.find((tab) => tab.id === tabId)?.name ?? "");
+    const tab = tabs.find((saved) => saved.id === tabId);
+    resourceTest?.accountLoaded(tabId, tab?.name ?? "", SERVICE_NAMES[serviceOfTab(tab)]);
     mainWindow.webContents.send("message-count", { tabId, messageCount });
     updateUnreadIndicators(mainWindow, tabs);
   });

@@ -74,7 +74,7 @@ test("totals add up the rounded rows, as the panel shows them", () => {
   assert.equal(total.cpuPercent, 3.9);
 });
 
-test("renderers without a page are WhatsApp's service workers", () => {
+test("renderers without a page are the accounts' service workers", () => {
   const groups = groupProcessUsage([...withoutStray, ...workers], { ...owners, workerProcesses: 2 });
   // They belong to the accounts, so they come right after them.
   assert.deepEqual(

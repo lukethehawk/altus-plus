@@ -4,7 +4,7 @@
 
 # Altus +
 
-**Più account WhatsApp in un'unica app desktop, sempre aggiornata.**
+**Più account WhatsApp, e anche Telegram, in un'unica app desktop, sempre aggiornata.**
 
 [![Ultima release](https://img.shields.io/github/v/release/lukethehawk/altus-plus?label=release)](https://github.com/lukethehawk/altus-plus/releases/latest)
 [![Piattaforma](https://img.shields.io/badge/piattaforma-Windows%20x64-0078D6)](https://github.com/lukethehawk/altus-plus/releases/latest)
@@ -24,7 +24,8 @@ Altus + funziona solo su Windows; su macOS o Linux usa l'originale. Si aggiorna 
 
 | | |
 |---|---|
-| 👥 **Più account** | Una scheda per ogni account WhatsApp, ognuna con la propria sessione isolata. Per riordinarle, attiva Scheda → *Consenti di spostare le schede* e trascina una scheda sopra un'altra. |
+| 👥 **Più account** | Una scheda per ogni account, ognuna con la propria sessione isolata. Per riordinarle, attiva Scheda → *Consenti di spostare le schede* e trascina una scheda sopra un'altra. |
+| ✈️ **Schede Telegram** | Ctrl+T e **+** chiedono quale servizio aprire nella nuova scheda: WhatsApp (già selezionato: basta premere Invio) oppure Telegram Web. Una scheda non cambia servizio. Le schede Telegram hanno le stesse notifiche per account, lo stesso silenzioso, i conteggi dei non letti e l'avviso dei download; i temi, le scorciatoie di formattazione, i tasti Invio e i link whatsapp:// restano di WhatsApp. |
 | 🔔 **Notifiche chiare** | Il titolo della notifica indica l'account (`Lavoro · Mario Rossi`). Un clic apre la scheda e la chat giuste. |
 | 🔕 **Silenzia per account** | Clic destro su una scheda per silenziarla per 1 ora, 8 ore o finché non la riattivi. Gli altri account continuano a notificare. |
 | 📥 **Non letti a colpo d'occhio** | Passa il mouse sull'icona nel tray per vedere le chat non lette di ogni account e quali account sono silenziati. |
@@ -82,14 +83,14 @@ Aggiornamenti e reinstallazioni non lo chiedono più. Per le installazioni autom
 
 ## Privacy
 
-Nelle schede Altus + carica solo WhatsApp Web. L'unica altra connessione è verso GitHub, per controllare gli aggiornamenti, e puoi disattivarla. Non c'è telemetria.
+Nelle schede Altus + carica solo WhatsApp Web e, in quelle che apri per Telegram, Telegram Web. L'unica altra connessione è verso GitHub, per controllare gli aggiornamenti, e puoi disattivarla. Non c'è telemetria.
 
 ## Sicurezza
 
 | Ambito | Cosa fa Altus + |
 |---|---|
 | **Account** | Ogni account gira in una sessione propria, isolata e in sandbox: un account non vede i dati di un altro. |
-| **Contenuti web** | Le schede possono restare solo su WhatsApp Web. Gli altri link si aprono nel browser, i pop-up sono bloccati e i messaggi interni dell'app vengono accettati solo dalla finestra o dalla scheda giusta. |
+| **Contenuti web** | Ogni scheda resta sul proprio servizio: WhatsApp Web oppure Telegram Web (la sua versione K). Il servizio di una scheda si sceglie quando la crei e non cambia più, e quello che la scheda può fare viene controllato in base a esso. Gli altri link si aprono nel browser, i pop-up sono bloccati e i messaggi interni dell'app vengono accettati solo dalla finestra o dalla scheda giusta. |
 | **Finestra dell'app** | Una Content-Security-Policy permette alla finestra di eseguire solo il codice di Altus +. |
 | **Eseguibile** | Le fuse di Electron spengono `RunAsNode`, `NODE_OPTIONS` e `--inspect`: altri programmi non possono usare l'eseguibile di Altus + per far girare codice proprio. |
 | **Integrità** | All'avvio l'app controlla il proprio pacchetto (`app.asar`) e si rifiuta di partire se è stato modificato. |
@@ -133,7 +134,7 @@ Altus + esiste grazie ad [**Altus**](https://github.com/amanharwara/altus) di **
 
 Realizzato con [Electron](https://www.electronjs.org/), [SolidJS](https://www.solidjs.com/), [Kobalte](https://kobalte.dev/), [electron-store](https://github.com/sindresorhus/electron-store) ed [electron-updater](https://www.electron.build/auto-update). Il tema scuro si basa su [vednoc/dark-whatsapp](https://github.com/vednoc/dark-whatsapp).
 
-Altus + non è affiliato a WhatsApp né a Meta.
+Altus + non è affiliato a WhatsApp, Meta o Telegram.
 
 ## Licenza
 

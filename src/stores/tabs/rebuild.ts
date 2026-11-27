@@ -1,5 +1,6 @@
 import { getDefaultTab, type Tab } from "./common";
 import { PARTITION_FOLDER } from "../../utils/partitions";
+import type { ServiceId } from "../../utils/services";
 
 /**
  * The tab list rebuilt when tabs.json could not be read: one tab per account
@@ -9,12 +10,17 @@ import { PARTITION_FOLDER } from "../../utils/partitions";
  * folders, so the lower-cased ID opens the same account, still logged in.
  * Tabs the user closed (closed-tabs.json) stay closed; if that list cannot
  * be read either, every account comes back, as one too many is better than
- * one hidden.
+ * one hidden. Each tab shows the service whose data its folder holds
+ * (serviceOfFolder; WhatsApp when unsure, as before services).
  */
-export function tabsFromPartitionFolders(partitionFolders: string[], closedTabIds: string[] | null): Tab[] {
+export function tabsFromPartitionFolders(
+  partitionFolders: string[],
+  closedTabIds: string[] | null,
+  serviceOfFolder: (folder: string) => ServiceId = () => "whatsapp"
+): Tab[] {
   const closed = new Set((closedTabIds ?? []).map((id) => id.toLowerCase()));
   return partitionFolders
     .filter((folder) => PARTITION_FOLDER.test(folder) && !closed.has(folder))
     .sort()
-    .map((id, index) => ({ ...getDefaultTab(), id, name: `Account ${index + 1}` }));
+    .map((id, index) => ({ ...getDefaultTab(serviceOfFolder(id)), id, name: `Account ${index + 1}` }));
 }

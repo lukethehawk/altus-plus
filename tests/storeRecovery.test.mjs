@@ -126,6 +126,22 @@ test("the tab list is rebuilt from the account folders, without the tabs the use
   assert.equal(isValidTabStoreValue("tabs", tabs), true);
 });
 
+test("a rebuilt tab shows the service whose data its folder holds", () => {
+  const services = { smokerebuiltalfa01: "whatsapp", smokerebuilttg02: "telegram" };
+  const tabs = tabsFromPartitionFolders(["smokerebuilttg02", "smokerebuiltalfa01"], [], (folder) => services[folder]);
+  assert.deepEqual(
+    tabs.map(({ id, name, service }) => ({ id, name, service })),
+    [
+      // WhatsApp's is saved without a service, as before services.
+      { id: "smokerebuiltalfa01", name: "Account 1", service: undefined },
+      { id: "smokerebuilttg02", name: "Account 2", service: "telegram" },
+    ]
+  );
+  assert.equal(isValidTabStoreValue("tabs", tabs), true);
+  // Without a way to tell: WhatsApp.
+  assert.equal(tabsFromPartitionFolders(["smokealfa"], [])[0].service, undefined);
+});
+
 test("folders that cannot be a tab's are skipped", () => {
   const tabs = tabsFromPartitionFolders(["Upper", "a.b", "", "x".repeat(65), "smokealfa"], []);
   assert.deepEqual(tabs.map((tab) => tab.id), ["smokealfa"]);

@@ -28,14 +28,26 @@ export function sendZoomKey(event: KeyboardEvent): boolean {
   }
 }
 
+type LinkOptions = {
+  /**
+   * Leave the links whose click the page handled itself (preventDefault), as
+   * Telegram does when it asks before opening a masked link.
+   */
+  skipHandled?: boolean;
+  /** Only right after the user's click or key, not on a page script's own click. */
+  needsUserActivation?: boolean;
+};
+
 /**
  * Opens the page's target="_blank" links in the default browser (through
  * main, which checks them: "open-link"), except the ones `keepInPage` leaves
  * to the page itself. Call it once the page has loaded.
  */
-export function openBlankLinksInBrowser(keepInPage: (url: URL) => boolean): void {
+export function openBlankLinksInBrowser(keepInPage: (url: URL) => boolean, options: LinkOptions = {}): void {
   document.body.addEventListener("click", (event) => {
     if (!(event.target instanceof HTMLAnchorElement)) return;
+    if (options.skipHandled && event.defaultPrevented) return;
+    if (options.needsUserActivation && !navigator.userActivation.isActive) return;
     if (
       event.target.tagName === "A" &&
       event.target.getAttribute("target") === "_blank"
