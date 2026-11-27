@@ -1,5 +1,5 @@
 /**
- * What a WhatsApp tab may use, from its own switches (Edit Tab →
+ * What a tab may use, from its own switches (Edit Tab →
  * Notifications, Microphone and Camera). The main process answers with
  * these from the moment the tab's session exists: Electron grants every
  * request a session has no handler for.
@@ -21,15 +21,15 @@ function switchAllows(permission: string, switches: TabPermissionSwitches): bool
 
 /**
  * A request (Notification.requestPermission, getUserMedia, geolocation…):
- * only from a WhatsApp page, only for notifications or the microphone and
+ * only from a page of the tab's service, only for notifications or the microphone and
  * camera, and only while the tab's switch is on.
  */
 export function allowPermissionRequest(
   permission: string,
-  fromWhatsApp: boolean,
+  fromService: boolean,
   switches: TabPermissionSwitches
 ): boolean {
-  return fromWhatsApp && SWITCHED_PERMISSIONS.has(permission) && switchAllows(permission, switches);
+  return fromService && SWITCHED_PERMISSIONS.has(permission) && switchAllows(permission, switches);
 }
 
 /**
@@ -40,9 +40,9 @@ export function allowPermissionRequest(
  */
 export function allowPermissionCheck(
   permission: string,
-  fromWhatsApp: boolean,
+  fromService: boolean,
   switches: TabPermissionSwitches
 ): boolean {
   if (!SWITCHED_PERMISSIONS.has(permission)) return true;
-  return allowPermissionRequest(permission, fromWhatsApp, switches);
+  return allowPermissionRequest(permission, fromService, switches);
 }
