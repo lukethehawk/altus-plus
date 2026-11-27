@@ -1,7 +1,8 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { ipcRenderer } from "electron";
 import { Theme } from "./stores/themes/common";
-import { isMuteActive, labelNotificationTitle } from "./utils/notifications";
 import { formatSelectedText } from "./utils/webview/formatSelectedText";
+import { setUpAccountNotifications } from "./utils/webview/accountNotifications";
+import { openBlankLinksInBrowser, sendUnreadCount, sendZoomKey } from "./utils/webview/tabPage";
 import { getLuminance } from "color2k";
 
 // A listener, not window.onload, which the page could take over.
@@ -15,19 +16,10 @@ window.addEventListener("load", () => {
   document.body.className = "web";
 
   document.body.addEventListener("keydown", (event) => {
-    if (!event.ctrlKey) return;
+    if (!event.ctrlKey || sendZoomKey(event)) return;
 
+    // WhatsApp's formatting marks around the selection.
     switch (event.key) {
-      case "=":
-      case "+":
-        ipcRenderer.send("zoom", "in");
-        break;
-      case "-":
-        ipcRenderer.send("zoom", "out");
-        break;
-      case "0":
-        ipcRenderer.send("zoom", "reset");
-        break;
       case "b":
         formatSelectedText("*");
         break;
@@ -45,20 +37,8 @@ window.addEventListener("load", () => {
     }
   });
 
-  document.body.addEventListener("click", (event) => {
-    if (!(event.target instanceof HTMLAnchorElement)) return;
-    if (
-      event.target.tagName === "A" &&
-      event.target.getAttribute("target") === "_blank"
-    ) {
-      const url = new URL(event.target.href);
-      if (url.hostname === "wa.me" || url.hostname === "api.whatsapp.com") {
-        // WhatsApp automatically opens the correct chat for "click to chat" links.
-        return;
-      }
-      ipcRenderer.send("open-link", event.target.href);
-    }
-  });
+  // WhatsApp automatically opens the correct chat for "click to chat" links.
+  openBlankLinksInBrowser((url) => url.hostname === "wa.me" || url.hostname === "api.whatsapp.com");
 
   registerTitleObserver();
 });
@@ -71,20 +51,14 @@ function getMessageCountFromTitle(title: string) {
   return parseInt(exec[0], 10);
 }
 
-let sentMessageCount: number | undefined;
-
 /**
  * Sends the unread count in the page title when it changes (or always, for
- * the first one). Main credits it to this page's tab from its session, so
- * it carries no tab ID.
+ * the first one).
  */
 function sendMessageCount(first = false) {
   const title = document.title;
   if (!first && !title) return;
-  const messageCount = getMessageCountFromTitle(title);
-  if (!first && messageCount === sentMessageCount) return;
-  sentMessageCount = messageCount;
-  ipcRenderer.send("message-count", { messageCount });
+  sendUnreadCount(getMessageCountFromTitle(title), first);
 }
 
 /**
@@ -242,84 +216,7 @@ ipcRenderer.on("set-id", (e, id) => {
   document.body.dataset.tabId = id;
 });
 
-// Account-aware notifications. WhatsApp Web shows message notifications with
-// the page's Notification API (Electron does not display service-worker ones)
-// and attaches its own click listener, which opens the chat. Wrapping the
-// constructor lets us name the account, honour a per-account mute and bring
-// this tab forward on click, without touching WhatsApp's internals.
-let notificationAccountName = "";
-let notificationsMutedUntil = 0;
-
-ipcRenderer.on("notification-config", (_event, config: unknown) => {
-  if (!config || typeof config !== "object") return;
-  const { accountName, mutedUntil } = config as Record<string, unknown>;
-  notificationAccountName = typeof accountName === "string" ? accountName : "";
-  notificationsMutedUntil = typeof mutedUntil === "number" ? mutedUntil : 0;
-});
-
-type NotificationBridge = {
-  isMuted: () => boolean;
-  labelTitle: (title: string) => string;
-  onClick: () => void;
-};
-
-const notificationBridge: NotificationBridge = {
-  isMuted: () => isMuteActive(notificationsMutedUntil, Date.now()),
-  labelTitle: (title) => labelNotificationTitle(notificationAccountName, title),
-  // Main brings forward the tab of this page's session.
-  onClick: () => ipcRenderer.send("notification-clicked"),
-};
-
-// Serialized into the page's world: must not reference anything outside.
-function installNotificationHooks(bridge: NotificationBridge) {
-  const NativeNotification = window.Notification;
-  if (typeof NativeNotification !== "function") return;
-
-  class AccountNotification extends NativeNotification {
-    constructor(title: string, options?: NotificationOptions) {
-      if (bridge.isMuted()) {
-        // Muted: hand back an inert stand-in that reports itself closed, so
-        // the page's own bookkeeping for the notification still completes.
-        const stub = Object.assign(new EventTarget(), {
-          title: String(title),
-          body: options?.body ?? "",
-          tag: options?.tag ?? "",
-          data: options?.data ?? null,
-          onclick: null,
-          onshow: null,
-          onerror: null,
-          onclose: null as ((event: Event) => void) | null,
-          close() {
-            // Nothing is shown, so there is nothing to close.
-          },
-        });
-        setTimeout(() => {
-          const event = new Event("close");
-          stub.dispatchEvent(event);
-          stub.onclose?.(event);
-        }, 0);
-        return stub as unknown as AccountNotification;
-      }
-      super(bridge.labelTitle(String(title)), options);
-      // Only the user's click on the notification, not a click event the
-      // page dispatches itself.
-      this.addEventListener("click", (event) => {
-        if (event.isTrusted) bridge.onClick();
-      });
-    }
-  }
-
-  // Keep the constructor looking like the native one to page code.
-  Object.defineProperty(AccountNotification, "name", { value: "Notification" });
-  Object.defineProperty(window, "Notification", {
-    value: AccountNotification,
-    writable: true,
-    configurable: true,
-    enumerable: false,
-  });
-}
-
-contextBridge.executeInMainWorld({
-  func: installNotificationHooks,
-  args: [notificationBridge],
-});
+// Account name, per-account mute and notification clicks (shared by every
+// service's tabs): WhatsApp Web shows message notifications with the page's
+// Notification API.
+setUpAccountNotifications();

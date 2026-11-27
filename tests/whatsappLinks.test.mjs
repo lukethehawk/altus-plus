@@ -7,7 +7,7 @@ import {
   normalizePhoneNumber,
   whatsAppChatAddress,
 } from "../src/utils/whatsappLinks.ts";
-import { isTrustedWhatsAppURL } from "../src/utils/security.ts";
+import { isServiceURL } from "../src/utils/services.ts";
 
 test("finds the link among the arguments Windows passes", () => {
   const exe = "C:\\Users\\a\\AppData\\Local\\Programs\\altus-plus\\Altus +.exe";
@@ -30,7 +30,7 @@ test("chat links become WhatsApp Web chats", () => {
   ];
   for (const [link, address] of cases) {
     assert.equal(whatsAppWebAddress(link), address, link);
-    assert.ok(isTrustedWhatsAppURL(address), address);
+    assert.ok(isServiceURL("whatsapp", address), address);
   }
 });
 

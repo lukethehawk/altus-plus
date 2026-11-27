@@ -1,4 +1,6 @@
-/** Restrict IPC-driven navigation and access to WhatsApp session partitions. */
+import { isServiceURL, serviceOfURL, type ServiceId } from "./services";
+
+/** Restrict IPC-driven navigation and access to tab session partitions. */
 export function getSafeExternalHttpURL(value: unknown): string | null {
   if (typeof value !== "string" || value.length === 0 || value.length > 8192) return null;
   try {
@@ -11,14 +13,9 @@ export function getSafeExternalHttpURL(value: unknown): string | null {
   }
 }
 
+/** A WhatsApp Web address, such as the one a whatsapp:// link opens. */
 export function isTrustedWhatsAppURL(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "web.whatsapp.com" &&
-      (url.port === "" || url.port === "443");
-  } catch {
-    return false;
-  }
+  return isServiceURL("whatsapp", value);
 }
 
 export function isAltusPartition(value: unknown): value is string {
@@ -26,17 +23,19 @@ export function isAltusPartition(value: unknown): value is string {
 }
 
 /**
- * Whether the app window may attach a <webview>: only a WhatsApp Web tab in
- * its own persistent partition ("will-attach-webview").
+ * The service of a <webview> the app window may attach: one that starts on a
+ * page of a service, in its own persistent partition ("will-attach-webview").
+ * Anything else is refused (undefined).
  */
-export function isAllowedWebview(src: unknown, partition: unknown): partition is string {
-  return typeof src === "string" && isTrustedWhatsAppURL(src) && isAltusPartition(partition);
+export function webviewService(src: unknown, partition: unknown): ServiceId | undefined {
+  if (!isAltusPartition(partition)) return undefined;
+  return serviceOfURL(src);
 }
 
 /**
- * Sets what every WhatsApp tab runs with, whatever the window asked for: the
- * given preload, no Node.js (in its frames either), context isolation and
- * the sandbox. Takes the webPreferences of "will-attach-webview".
+ * Sets what every tab runs with, whatever the window asked for: the given
+ * preload, no Node.js (in its frames either), context isolation and the
+ * sandbox. Takes the webPreferences of "will-attach-webview".
  */
 export function lockDownWebview(
   webPreferences: {
@@ -56,11 +55,16 @@ export function lockDownWebview(
 }
 
 /**
- * A message from a WhatsApp tab: a webview showing WhatsApp Web, not the app
- * window or another page. Takes Electron's WebContents.
+ * A message from a tab's own page: a webview showing a page of the service
+ * of its session (`service`, undefined for a session that is no tab's), not
+ * the app window, another site, or another service. Takes Electron's
+ * WebContents.
  */
-export function isWhatsAppPage(sender: { getType(): string; getURL(): string }): boolean {
-  return sender.getType() === "webview" && isTrustedWhatsAppURL(sender.getURL());
+export function isServicePage(
+  sender: { getType(): string; getURL(): string },
+  service: ServiceId | undefined
+): boolean {
+  return service !== undefined && sender.getType() === "webview" && isServiceURL(service, sender.getURL());
 }
 
 /**

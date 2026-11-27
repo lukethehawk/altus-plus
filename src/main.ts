@@ -95,12 +95,13 @@ import {
 } from "./updater";
 import {
   getSafeExternalHttpURL,
-  isAllowedWebview,
+  isServicePage,
   isTrustedWhatsAppURL,
-  isWhatsAppPage,
   lockDownWebview,
   onlyFromSender,
+  webviewService,
 } from "./utils/security";
+import { isServiceURL, type ServiceId } from "./utils/services";
 import { nextZoomFactor, reportedUnreadCount } from "./utils/pageMessages";
 import { TabSessions } from "./utils/tabSessions";
 import { allowPermissionCheck, allowPermissionRequest } from "./utils/permissions";
@@ -554,19 +555,20 @@ function createWindow() {
     icon: mainIcon,
   });
 
-  // Every <webview> must be a WhatsApp Web tab in its own persistent
-  // partition, running our preload without Node access, whatever the
-  // renderer asked for.
+  // Every <webview> must be a tab that starts on a page of a service, in its
+  // own persistent partition, running that service's preload without Node
+  // access, whatever the renderer asked for. A partition keeps the service it
+  // first showed.
   mainWindow.webContents.on(
     "will-attach-webview",
     (event, webPreferences, params) => {
-      if (!isAllowedWebview(params.src, params.partition)) {
+      const service = webviewService(params.src, params.partition);
+      // Before the page loads, not once it has (the window used to ask).
+      if (!service || !setUpTabSession(params.partition, service)) {
         event.preventDefault();
         return;
       }
-      lockDownWebview(webPreferences, path.join(__dirname, "whatsapp.preload.cjs"));
-      // Before the page loads, not once it has (the window used to ask).
-      setUpTabPermissions(params.partition);
+      lockDownWebview(webPreferences, path.join(__dirname, SERVICE_PRELOADS[service]));
     }
   );
   // The app UI is a local page: it never navigates away or opens windows.
@@ -755,10 +757,10 @@ if (!singleInstanceLock) {
       // Popups stay disabled as before (no allowpopups); _blank links are
       // handled by the preload through the validated "open-link" channel.
       webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-      // Keep each tab on WhatsApp Web; open other http(s) pages in the
+      // Keep each tab on its service; open other http(s) pages in the
       // default browser instead of inside the account's session.
       webContents.on("will-navigate", (event, url) => {
-        if (isTrustedWhatsAppURL(url)) return;
+        if (isTabServiceURL(webContents, url)) return;
         event.preventDefault();
         const externalURL = getSafeExternalHttpURL(url);
         if (!externalURL) return;
@@ -766,18 +768,18 @@ if (!singleInstanceLock) {
           .openExternal(externalURL)
           .catch((error) => console.error("Failed to open external URL:", error));
       });
-      // A server redirect (a WhatsApp address answering with a redirect to
-      // another site) emits no will-navigate: the other site loaded inside
-      // the account's session. Cancelled, not opened in the browser: the
-      // user did not ask for that page.
+      // A server redirect (an address of the service answering with a
+      // redirect to another site) emits no will-navigate: the other site
+      // loaded inside the account's session. Cancelled, not opened in the
+      // browser: the user did not ask for that page.
       webContents.on("will-redirect", (details) => {
-        if (!details.isMainFrame || isTrustedWhatsAppURL(details.url)) return;
+        if (!details.isMainFrame || isTabServiceURL(webContents, details.url)) return;
         details.preventDefault();
         const where = URL.canParse(details.url) ? new URL(details.url).origin : "an invalid address";
-        console.warn(`Blocked a WhatsApp tab's redirect to ${where}`);
+        console.warn(`Blocked a tab's redirect to ${where}`);
       });
       // A crashed account reloads on its own without touching the others.
-      recoverRendererOnFailure(webContents, "WhatsApp tab");
+      recoverRendererOnFailure(webContents, "Tab");
 
       contextMenu({
         window: {
@@ -789,7 +791,8 @@ if (!singleInstanceLock) {
         labels: localizedContextMenuLabels,
         append: (def, params, window) => {
           // WhatsApp's formatting marks, around the selection in the text
-          // being written (src/whatsapp.preload.ts).
+          // being written (src/whatsapp.preload.ts): WhatsApp tabs only.
+          if (tabSessions.serviceOf(webContents.session) !== "whatsapp") return [];
           const format = (label: string, mark: string) => ({
             label,
             visible: params.isEditable,
@@ -806,11 +809,16 @@ if (!singleInstanceLock) {
     }
 
     // Enter as a new line, and the keys that send instead (Ctrl+Enter,
-    // Right Shift+Enter): see src/utils/keyboard.ts.
-    attachEnterKeys(webContents, () => ({
-      preventEnter: getSettingWithDefault("preventEnter"),
-      sendWithRightShiftEnter: getSettingWithDefault("sendWithRightShiftEnter"),
-    }));
+    // Right Shift+Enter): see src/utils/keyboard.ts. These are WhatsApp's
+    // keys: a tab of another service keeps its own.
+    attachEnterKeys(webContents, () => {
+      const otherService =
+        webContents.getType() === "webview" && tabSessions.serviceOf(webContents.session) !== "whatsapp";
+      return {
+        preventEnter: !otherService && getSettingWithDefault("preventEnter"),
+        sendWithRightShiftEnter: !otherService && getSettingWithDefault("sendWithRightShiftEnter"),
+      };
+    });
   });
 }
 
@@ -982,43 +990,61 @@ function toggleTray(mainWindow: BrowserWindow, enabled: boolean) {
   });
 }
 
+/** The preload each service's tabs run, next to the main bundle. */
+const SERVICE_PRELOADS: Record<ServiceId, string> = {
+  whatsapp: "whatsapp.preload.cjs",
+};
+
 /** Partitions whose permission handlers are set (once per session). */
 const partitionsWithPermissionHandlers = new Set<string>();
-// The tab of each tab session, for what its WhatsApp page reports.
+// The tab and service of each tab session, for what its page reports and
+// may do.
 const tabSessions = new TabSessions<Electron.Session>();
 
+/** Whether an address is a page of the service of the tab it is in. */
+function isTabServiceURL(contents: Electron.WebContents, url: string): boolean {
+  const service = tabSessions.serviceOf(contents.session);
+  return service !== undefined && isServiceURL(service, url);
+}
+
 /**
- * Sets a tab's permission handlers when its webview attaches, before
- * WhatsApp loads: Electron grants every request a session has no handler
- * for. Each answer reads the tab's switches as saved, so turning one on or
- * off applies at once.
+ * Binds a tab's session to the service its webview starts on, and sets its
+ * permission handlers, when the webview attaches, before the page loads:
+ * Electron grants every request a session has no handler for. False when
+ * the session already shows another service: the webview is refused. Each
+ * answer reads the tab's switches as saved, so turning one on or off
+ * applies at once.
  */
-function setUpTabPermissions(partition: string) {
-  if (partitionsWithPermissionHandlers.has(partition)) return;
+function setUpTabSession(partition: string, service: ServiceId): boolean {
+  const tabSession = session.fromPartition(partition);
+  if (!tabSessions.register(tabSession, partition, service)) return false;
+  if (partitionsWithPermissionHandlers.has(partition)) return true;
   partitionsWithPermissionHandlers.add(partition);
   const switchesOf = () => savedTabs().find((tab) => `persist:${tab.id}` === partition)?.config;
-  const tabSession = session.fromPartition(partition);
-  tabSessions.register(tabSession, partition);
   tabSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-    // The frame asking, so that a page embedded in WhatsApp gets nothing.
-    const fromWhatsApp = isTrustedWhatsAppURL(details.requestingUrl || contents.getURL());
-    callback(allowPermissionRequest(permission, fromWhatsApp, switchesOf()));
+    // The frame asking, so that a page embedded in the service's page gets
+    // nothing.
+    const fromService = isServiceURL(service, details.requestingUrl || contents.getURL());
+    callback(allowPermissionRequest(permission, fromService, switchesOf()));
   });
   tabSession.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
-    const fromWhatsApp = isTrustedWhatsAppURL(requestingOrigin || contents?.getURL() || "");
-    return allowPermissionCheck(permission, fromWhatsApp, switchesOf());
+    const fromService = isServiceURL(service, requestingOrigin || contents?.getURL() || "");
+    return allowPermissionCheck(permission, fromService, switchesOf());
   });
+  return true;
 }
 
 function addIPCHandlers(mainWindow: BrowserWindow) {
   // Every invoke channel serves the app's own UI, and only the app window may
-  // call it. WhatsApp pages only use the send channels below (open-link,
+  // call it. Tab pages only use the send channels below (open-link,
   // notification-clicked, zoom, message-count), which check that the sender
-  // is a WhatsApp tab.
+  // is a tab's own page: one of the service its session shows.
   const handle = (
     channel: string,
     listener: Parameters<typeof ipcMain.handle>[1]
   ) => ipcMain.handle(channel, onlyFromSender(mainWindow.webContents, channel, listener));
+  const fromTabPage = (sender: Electron.WebContents) =>
+    isServicePage(sender, tabSessions.serviceOf(sender.session));
 
   // The window asks which account opens a whatsapp:// link from now on; one
   // that arrived earlier (the link the app was started with) is handed over.
@@ -1114,7 +1140,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
 
 
   ipcMain.on("open-link", (event, rawURL: unknown) => {
-    if (!isWhatsAppPage(event.sender)) return;
+    if (!fromTabPage(event.sender)) return;
     const url = getSafeExternalHttpURL(rawURL);
     if (!url) return;
     void shell.openExternal(url).catch((error) => console.error("Failed to open external URL:", error));
@@ -1186,7 +1212,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
   // account's tab. WhatsApp's own click handler then opens the chat.
   ipcMain.on("notification-clicked", (event) => {
     const { sender } = event;
-    if (!isWhatsAppPage(sender)) return;
+    if (!fromTabPage(sender)) return;
     // The tab of the page's own session, never one the page names.
     const tabId = tabSessions.tabOf(sender.session);
     if (tabId === undefined || !savedTabs().some((tab) => tab.id === tabId)) return;
@@ -1196,7 +1222,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
   });
 
   ipcMain.on("zoom", ({ sender }, change: unknown) => {
-    if (!isWhatsAppPage(sender)) return;
+    if (!fromTabPage(sender)) return;
     const zoomFactor = nextZoomFactor(sender.getZoomFactor(), change);
     if (zoomFactor !== undefined) sender.setZoomFactor(zoomFactor);
   });
@@ -1205,7 +1231,7 @@ function addIPCHandlers(mainWindow: BrowserWindow) {
     // Quitting or restarting destroys the window first; counts the tabs sent
     // meanwhile still arrive (often right after a start, while they sync).
     if (mainWindow.isDestroyed()) return;
-    if (!isWhatsAppPage(event.sender)) return;
+    if (!fromTabPage(event.sender)) return;
     const messageCount = reportedUnreadCount(detail);
     // The count is the page's own tab's: a page can rewrite the tab ID the
     // window gave it, not the session it runs in.
